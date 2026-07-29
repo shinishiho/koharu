@@ -4,7 +4,7 @@ title: Solução de problemas
 
 # Solução de problemas
 
-Esta página cobre os problemas mais comuns do Koharu na implementação atual: downloads na primeira execução, inicialização do runtime, fallback de GPU, acesso em headless e MCP, ordenação de estágios do pipeline e configuração para build a partir do código-fonte.
+Esta página cobre os problemas mais comuns do Koharu na implementação atual: downloads na primeira execução, inicialização do runtime, fallback de GPU, acesso em headless, ordenação de estágios do pipeline e configuração para build a partir do código-fonte.
 
 ## Antes de começar
 
@@ -14,7 +14,7 @@ Ao fazer diagnóstico de problemas, identifique primeiro qual camada está falha
 - downloads de runtime ou modelos
 - aceleração por GPU
 - estágios do pipeline de páginas como detect, OCR, inpaint ou render
-- conectividade headless ou MCP
+- conectividade headless
 - build a partir do código-fonte e desenvolvimento local
 
 Isso costuma isolar o problema rapidamente.
@@ -98,7 +98,7 @@ Se o driver for antigo ou a verificação de CUDA falhar, o Koharu deliberadamen
 
 Alguns erros são apenas problemas de ordenação do pipeline.
 
-Exemplos comuns da API e da camada MCP atuais:
+Exemplos comuns da API e da camada de pipeline atuais:
 
 - `No segment mask available. Run detect first.`
 - `No rendered image found`
@@ -163,25 +163,6 @@ Detalhe importante de implementação:
 Isso significa que a Web UI local só está disponível na mesma máquina, a menos que você exponha por conta própria através da sua configuração de rede.
 
 Verifique também se outro processo não está usando a porta escolhida.
-
-## O cliente MCP não consegue conectar
-
-Use uma porta fixa e aponte o cliente para:
-
-```text
-http://localhost:9999/mcp
-```
-
-Erros comuns:
-
-- usar a URL raiz em vez de `/mcp`
-- esquecer `--port`
-- tentar conectar depois que o processo do Koharu já encerrou
-- tentar alcançar o serviço a partir de outra máquina sem expor explicitamente a porta
-
-Se o acesso normal à Web UI headless funciona mas o MCP não, confira primeiro a URL exata. Seleção de caminho errado é mais comum do que falha de servidor.
-
-Se o cliente for Antigravity, Claude Desktop ou Claude Code, siga a configuração específica por cliente em [Configurar Clientes MCP](configure-mcp-clients.md).
 
 ## A importação parece não fazer nada
 
@@ -272,8 +253,7 @@ Nesse ponto, colete:
 ## Páginas relacionadas
 
 - [Instalar o Koharu](install-koharu.md)
-- [Executar nos Modos GUI, Headless e MCP](run-gui-headless-and-mcp.md)
-- [Configurar Clientes MCP](configure-mcp-clients.md)
+- [Executar nos Modos GUI e Headless](run-gui-and-headless.md)
 - [Build a Partir do Código-Fonte](build-from-source.md)
 - [Referência da CLI](../reference/cli.md)
 - [Mergulho Técnico Profundo](../explanation/technical-deep-dive.md)

@@ -69,7 +69,7 @@ Koharu が正常に起動したら、次に考えることはたいてい以下�
 
 続けて読むページ:
 
-- [GUI / Headless / MCP モードを使う](run-gui-headless-and-mcp.md)
+- [GUI / Headless モードを使う](run-gui-and-headless.md)
 - [モデルとプロバイダ](../explanation/models-and-providers.md)
 - [ページを書き出し、プロジェクトを管理する](export-and-manage-projects.md)
 - [トラブルシューティング](troubleshooting.md)

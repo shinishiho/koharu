@@ -4,7 +4,7 @@ title: トラブルシューティング
 
 # トラブルシューティング
 
-このページでは、現在の実装に基づいて起こりやすい Koharu の問題を扱います。主な対象は、初回ダウンロード、ランタイム初期化、GPU フォールバック、headless / MCP アクセス、パイプライン段階の順序、ソースビルド周りです。
+このページでは、現在の実装に基づいて起こりやすい Koharu の問題を扱います。主な対象は、初回ダウンロード、ランタイム初期化、GPU フォールバック、headless アクセス、パイプライン段階の順序、ソースビルド周りです。
 
 ## 最初に切り分けること
 
@@ -14,7 +14,7 @@ title: トラブルシューティング
 - ランタイムまたはモデルのダウンロード
 - GPU アクセラレーション
 - detect、OCR、inpaint、render などのページパイプライン段階
-- headless または MCP 接続
+- headless 接続
 - ソースビルドとローカル開発
 
 ここが分かるだけで、かなり問題を狭められます。
@@ -98,7 +98,7 @@ Koharu が CUDA 13.0 対応を確認できない場合、これは想定され�
 
 これは単純にパイプライン順序の問題であることがよくあります。
 
-現在の API と MCP 層でよくある例:
+現在の API とパイプライン層でよくある例:
 
 - `No segment mask available. Run detect first.`
 - `No rendered image found`
@@ -163,25 +163,6 @@ http://localhost:4000
 つまり、ローカル Web UI は、自分でネットワーク公開しない限り同じマシンからしか見えません。
 
 また、選んだポートを別プロセスがすでに使っていないかも確認してください。
-
-## MCP クライアントが接続できない
-
-固定ポートを使い、クライアントは次に向けてください。
-
-```text
-http://localhost:9999/mcp
-```
-
-よくある間違い:
-
-- `/mcp` ではなくルート URL を使う
-- `--port` を付け忘れる
-- Koharu プロセスがすでに終了したあとに接続しようとする
-- ポートを明示的に公開せず、別マシンから到達できると思う
-
-通常の headless Web UI アクセスは動くのに MCP だけ動かない場合、まず URL のパスが正しいかを確認してください。サーバー障害より単純なパス間違いのほうが多いです。
-
-Antigravity、Claude Desktop、Claude Code を使う場合は、[MCP クライアントを設定する](configure-mcp-clients.md) にあるクライアント別設定に従ってください。
 
 ## 読み込みしても何も起きないように見える
 
@@ -272,8 +253,7 @@ bun cargo build --release -p koharu --features=cuda
 ## 関連ページ
 
 - [Koharu をインストールする](install-koharu.md)
-- [GUI / Headless / MCP モードを使う](run-gui-headless-and-mcp.md)
-- [MCP クライアントを設定する](configure-mcp-clients.md)
+- [GUI / Headless モードを使う](run-gui-and-headless.md)
 - [ソースからビルドする](build-from-source.md)
 - [CLI リファレンス](../reference/cli.md)
 - [技術的な詳細解説](../explanation/technical-deep-dive.md)

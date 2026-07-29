@@ -11,7 +11,6 @@ Koharu uses the same binary for:
 - desktop startup
 - headless local Web UI
 - the local HTTP API
-- the built-in MCP server
 
 ## Common usage
 
@@ -48,7 +47,6 @@ When a fixed port is set, the main local endpoints are:
 
 - `http://localhost:<PORT>/`
 - `http://localhost:<PORT>/api/v1`
-- `http://localhost:<PORT>/mcp`
 
 ## Common patterns
 
@@ -68,18 +66,6 @@ Download runtime packages ahead of time:
 
 ```bash
 koharu --download
-```
-
-Run a local MCP endpoint on a stable port:
-
-```bash
-koharu --port 9999
-```
-
-Then connect your MCP client to:
-
-```text
-http://localhost:9999/mcp
 ```
 
 Start with explicit debug logging:

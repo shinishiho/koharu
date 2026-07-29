@@ -69,7 +69,7 @@ Koharu 成功启动后，通常接下来要决定的是：
 
 参见：
 
-- [以 GUI、Headless 与 MCP 模式运行](run-gui-headless-and-mcp.md)
+- [以 GUI 与 Headless 模式运行](run-gui-and-headless.md)
 - [模型与提供商](../explanation/models-and-providers.md)
 - [导出页面与管理项目](export-and-manage-projects.md)
 - [故障排查](troubleshooting.md)

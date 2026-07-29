@@ -1,7 +1,7 @@
 ---
 title: Visão geral
 social_title: Koharu
-description: Koharu é um tradutor de mangá local-first feito em Rust, com OCR, inpainting, suporte a LLMs locais e remotas, Web UI e automação via MCP.
+description: Koharu é um tradutor de mangá local-first feito em Rust, com OCR, inpainting, suporte a LLMs locais e remotas e Web UI.
 hide:
   - navigation
   - toc
@@ -309,35 +309,6 @@ hide:
     padding-top: 3.8rem;
   }
 
-  .kh-mcp-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 2rem;
-  }
-
-  .kh-mcp-card {
-    display: grid;
-    gap: 0.65rem;
-    padding: 1.2rem;
-    border: 1px solid var(--kh-panel-border);
-    border-radius: 1rem;
-    background: var(--kh-panel);
-    box-shadow: none;
-  }
-
-  .kh-mcp-card h3 {
-    font-size: 0.9rem;
-    font-weight: 800;
-    line-height: 1.3;
-  }
-
-  .kh-mcp-card p {
-    color: var(--kh-muted);
-    font-size: 0.84rem;
-    line-height: 1.6;
-  }
-
   .kh-dev__lead {
     display: grid;
     justify-items: center;
@@ -409,7 +380,6 @@ hide:
 
   @media screen and (max-width: 76rem) {
     .kh-command-grid,
-    .kh-mcp-grid,
     .kh-resource-panel__grid {
       grid-template-columns: 1fr;
     }
@@ -549,39 +519,6 @@ koharu.exe --port 4000 --headless</code></pre>
     </div>
   </section>
 
-  <section class="kh-section">
-    <div class="kh-shell">
-      <div class="kh-section__header">
-        <div class="kh-kicker">Integração com MCP</div>
-        <h2>Deixe agentes operarem o Koharu enquanto os modelos e os dados das páginas permanecem na máquina local.</h2>
-        <p>
-          O Koharu tem suporte a MCP, então a UI desktop, o modo headless e fluxos de
-          trabalho com agentes conversam com o mesmo runtime local de tradução, sem
-          se dividirem em stacks separadas.
-        </p>
-      </div>
-
-      <div class="kh-mcp-grid">
-        <div class="kh-mcp-card">
-          <h3>Um runtime, vários pontos de entrada</h3>
-          <p>
-            O mesmo pipeline de páginas alimenta a UI desktop, a Web UI headless e as
-            ferramentas MCP, então a automação permanece alinhada com as sessões
-            normais de edição.
-          </p>
-        </div>
-        <div class="kh-mcp-card">
-          <h3>Tarefas de tradução amigáveis a agentes</h3>
-          <p>
-            Use agentes para tradução em lote, ciclos de revisão, exportações e
-            ferramentas auxiliares que precisem de acesso a OCR, limpeza, tradução e
-            saídas em nível de página.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="kh-dev">
     <div class="kh-shell">
       <div class="kh-dev__lead">
@@ -591,7 +528,7 @@ koharu.exe --port 4000 --headless</code></pre>
         <p>
           O Koharu foi pensado para ser prático de compilar e prático de integrar. Use
           Bun e Rust para builds locais, flags estáveis de runtime para deploy e o
-          modo headless ou MCP quando você precisar de automação em volta do app.
+          modo headless quando você precisar de automação em volta do app.
         </p>
       </div>
 
@@ -622,14 +559,14 @@ bun run build</code></pre>
           <div class="kh-resource-card">
             <div class="kh-resource-card__eyebrow">Automação</div>
             <div class="kh-resource-card__copy">
-              Reutilize o mesmo pipeline de páginas em modo headless ou via MCP quando
+              Reutilize o mesmo pipeline de páginas pela API HTTP em modo headless quando
               o Koharu precisar participar de fluxos locais maiores.
             </div>
             <div class="kh-chip-list">
               <span class="kh-chip">App desktop</span>
               <span class="kh-chip">Modo headless</span>
               <span class="kh-chip">Web UI local</span>
-              <span class="kh-chip">Fluxos com agentes MCP</span>
+              <span class="kh-chip">Fluxos via API HTTP</span>
               <span class="kh-chip">Integrações locais</span>
             </div>
           </div>

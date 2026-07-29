@@ -25,7 +25,7 @@ We welcome and appreciate any form of contribution.
 ### Feature Development
 
 - Add new OCR, detection, inpainting, or LLM backends
-- Improve the text renderer, the HTTP API, or the MCP server
+- Improve the text renderer or the HTTP API
 - Extend the UI with new panels, shortcuts, or workflows
 
 ### Documentation
@@ -57,7 +57,7 @@ Koharu is organized as a Rust workspace with a Tauri shell and a Next.js UI:
 - **`koharu-llm/`** — llama.cpp bindings and LLM providers
 - **`koharu-renderer/`** — text shaping and rendering
 - **`koharu-psd/`** — layered PSD export
-- **`koharu-rpc/`** — HTTP API and MCP server
+- **`koharu-rpc/`** — HTTP API and SSE transport
 - **`koharu-runtime/`** — runtime and model download management
 - **`ui/`** — Next.js web UI
 - **`tests/`** — Playwright end-to-end tests

@@ -17,10 +17,6 @@ type PreferencesState = {
   toggleFavoriteFont: (font: string) => void
   customSystemPrompt?: string
   setCustomSystemPrompt: (prompt?: string) => void
-  codexImagePrompt?: string
-  setCodexImagePrompt: (prompt?: string) => void
-  codexImageModel?: string
-  setCodexImageModel: (model?: string) => void
   shortcuts: {
     select: string
     block: string
@@ -62,9 +58,6 @@ const initialPreferences = {
     undo: getPlatform() === 'mac' ? 'Cmd+Z' : 'Ctrl+Z',
     redo: getPlatform() === 'mac' ? 'Cmd+Shift+Z' : 'Ctrl+Shift+Z',
   },
-  codexImagePrompt:
-    'Translate all visible text to natural English, remove the original lettering, and redraw the page as a clean manga image while preserving the artwork, panel layout, speech bubbles, tone, and composition.',
-  codexImageModel: 'gpt-5.5',
   customPipeline: {
     detect: true,
     ocr: true,
@@ -93,8 +86,6 @@ export const usePreferencesStore = create<PreferencesState>()(
             : [...state.favoriteFonts, font],
         })),
       setCustomSystemPrompt: (prompt) => set({ customSystemPrompt: prompt }),
-      setCodexImagePrompt: (prompt) => set({ codexImagePrompt: prompt }),
-      setCodexImageModel: (model) => set({ codexImageModel: model }),
       setShortcuts: (shortcuts) =>
         set((state) => ({
           shortcuts: {
@@ -119,7 +110,7 @@ export const usePreferencesStore = create<PreferencesState>()(
     }),
     {
       name: 'koharu-config',
-      version: 7,
+      version: 8,
       migrate: (persisted: any, version: number) => {
         if (version < 2 && persisted) {
           delete persisted.localLlm
@@ -147,12 +138,12 @@ export const usePreferencesStore = create<PreferencesState>()(
             persisted.shortcuts.redo = isMac ? 'Cmd+Shift+Z' : 'Ctrl+Shift+Z'
           }
         }
-        if (version < 6 && persisted) {
-          persisted.codexImagePrompt ??= initialPreferences.codexImagePrompt
-          persisted.codexImageModel ??= initialPreferences.codexImageModel
-        }
         if (persisted && (version < 7 || persisted.customPipeline?.detect === undefined)) {
           persisted.customPipeline = initialPreferences.customPipeline
+        }
+        if (version < 8 && persisted) {
+          delete persisted.codexImagePrompt
+          delete persisted.codexImageModel
         }
         return persisted
       },
@@ -161,8 +152,6 @@ export const usePreferencesStore = create<PreferencesState>()(
         defaultFont: state.defaultFont,
         favoriteFonts: state.favoriteFonts,
         customSystemPrompt: state.customSystemPrompt,
-        codexImagePrompt: state.codexImagePrompt,
-        codexImageModel: state.codexImageModel,
         shortcuts: state.shortcuts,
         customPipeline: state.customPipeline,
       }),

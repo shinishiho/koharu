@@ -12,7 +12,7 @@ A full desktop build includes:
 
 - the Rust application in `koharu/`
 - the embedded UI from `ui/`
-- the local HTTP, RPC, and MCP server used by both GUI and headless modes
+- the local HTTP and RPC server used by both GUI and headless modes
 
 The default desktop build is platform-aware:
 
@@ -101,4 +101,4 @@ Building the app does not bundle every model weight. On first launch, Koharu sti
 - download the default vision and OCR models
 - download optional local translation LLMs later when you choose them in Settings
 
-If you want to prefetch those dependencies without starting the app, see [Run GUI, Headless, and MCP Modes](run-gui-headless-and-mcp.md).
+If you want to prefetch those dependencies without starting the app, see [Run GUI and Headless Modes](run-gui-and-headless.md).

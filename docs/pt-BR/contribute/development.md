@@ -128,5 +128,5 @@ PRs pequenos e focados são revisados mais rápido do que PRs grandes e misturad
 ## Páginas Relacionadas
 
 - [Build a Partir do Código-fonte](../how-to/build-from-source.md)
-- [Executar nos Modos GUI, Headless e MCP](../how-to/run-gui-headless-and-mcp.md)
+- [Executar nos Modos GUI e Headless](../how-to/run-gui-and-headless.md)
 - [Solução de Problemas](../how-to/troubleshooting.md)

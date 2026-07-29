@@ -11,7 +11,6 @@ Koharu 使用同一个二进制来支持：
 - 桌面启动
 - 本地 Headless Web UI
 - 本地 HTTP API
-- 内置 MCP 服务器
 
 ## 常见用法
 
@@ -48,7 +47,6 @@ koharu.exe [OPTIONS]
 
 - `http://localhost:<PORT>/`
 - `http://localhost:<PORT>/api/v1`
-- `http://localhost:<PORT>/mcp`
 
 ## 常见模式
 
@@ -68,18 +66,6 @@ koharu --cpu
 
 ```bash
 koharu --download
-```
-
-在固定端口启动本地 MCP 端点：
-
-```bash
-koharu --port 9999
-```
-
-然后让 MCP 客户端连接：
-
-```text
-http://localhost:9999/mcp
 ```
 
 显式启用调试日志：

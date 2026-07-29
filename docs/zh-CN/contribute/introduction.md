@@ -25,7 +25,7 @@ title: 简介
 ### 功能开发
 
 - 新增 OCR、检测、修复或 LLM 后端
-- 改进文本渲染器、HTTP API 或 MCP Server
+- 改进文本渲染器或 HTTP API
 - 扩展 UI 面板、快捷键与工作流
 
 ### 文档
@@ -57,7 +57,7 @@ Koharu 是一个 Rust workspace，外壳是 Tauri，UI 是 Next.js：
 - **`koharu-llm/`** — llama.cpp 绑定与 LLM Provider
 - **`koharu-renderer/`** — 文本 Shape 与渲染
 - **`koharu-psd/`** — 分层 PSD 导出
-- **`koharu-rpc/`** — HTTP API 与 MCP Server
+- **`koharu-rpc/`** — HTTP API 与 SSE 传输
 - **`koharu-runtime/`** — 运行时与模型下载管理
 - **`ui/`** — Next.js Web UI
 - **`tests/`** — Playwright E2E 测试

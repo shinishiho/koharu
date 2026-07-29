@@ -12,7 +12,7 @@ title: ソースからビルドする
 
 - `koharu/` の Rust アプリケーション
 - `ui/` の埋め込み UI
-- GUI モードと headless モードの両方で使われるローカル HTTP / RPC / MCP サーバー
+- GUI モードと headless モードの両方で使われるローカル HTTP / RPC サーバー
 
 既定のデスクトップビルドはプラットフォームを見て機能を切り替えます。
 
@@ -101,4 +101,4 @@ bun cargo build --release -p koharu --features=metal
 - 既定の vision / OCR モデル群をダウンロードする
 - オプションのローカル翻訳 LLM は、設定で選択された時点で後からダウンロードする
 
-アプリを立ち上げずにこれらの依存物だけ先に取得したい場合は、[GUI / Headless / MCP モードを使う](run-gui-headless-and-mcp.md) を参照してください。
+アプリを立ち上げずにこれらの依存物だけ先に取得したい場合は、[GUI / Headless モードを使う](run-gui-and-headless.md) を参照してください。

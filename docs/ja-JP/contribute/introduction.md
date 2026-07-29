@@ -25,7 +25,7 @@ Koharu に興味を持っていただきありがとうございます。Koharu 
 ### 機能開発
 
 - OCR、検出、インペイント、LLM バックエンドの追加
-- テキストレンダラー、HTTP API、MCP サーバの改善
+- テキストレンダラーや HTTP API の改善
 - UI のパネル、ショートカット、ワークフローの拡張
 
 ### ドキュメント
@@ -57,7 +57,7 @@ Koharu は Rust ワークスペースに Tauri シェルと Next.js UI を組み
 - **`koharu-llm/`** — llama.cpp バインディングと LLM プロバイダ
 - **`koharu-renderer/`** — テキストシェーピングとレンダリング
 - **`koharu-psd/`** — レイヤー付き PSD エクスポート
-- **`koharu-rpc/`** — HTTP API と MCP サーバ
+- **`koharu-rpc/`** — HTTP API と SSE トランスポート
 - **`koharu-runtime/`** — ランタイムとモデルダウンロードの管理
 - **`ui/`** — Next.js 製 Web UI
 - **`tests/`** — Playwright による E2E テスト

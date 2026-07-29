@@ -9,8 +9,15 @@ export default defineConfig({
       client: 'react-query',
       mode: 'tags-split',
       baseUrl: '/api/v1',
-      mock: true,
+      mock: {
+        generators: [{ type: 'msw' }],
+      },
       override: {
+        mock: {
+          properties: {
+            textAlign: null,
+          },
+        },
         fetch: {
           includeHttpResponseReturnType: false,
         },

@@ -18,7 +18,7 @@ http://127.0.0.1:<PORT>/api/v1
 
 - API は GUI または headless ランタイムと同じプロセスで提供される
 - サーバーは既定で `127.0.0.1` にバインドされる。別ホストに公開したい場合は `--host` を使う
-- API と MCP サーバーは同じ読み込み済みプロジェクト、モデル、パイプライン状態を共有する
+- API と Web UI は同じ読み込み済みプロジェクト、モデル、パイプライン状態を共有する
 - `--port` を指定しない場合、Koharu はランダムなローカルポートを選ぶ
 - `/api/v1/downloads`、`/api/v1/operations`、`/api/v1/events` を除く全エンドポイントは、アプリのブートストラップが完了するまで `503 Service Unavailable` を返す
 
@@ -231,5 +231,3 @@ GET /events
 6. `format = "rendered"` または `"psd"` を指定して `POST /projects/current/export`
 
 より細かく制御したい場合は、フルパイプラインを実行する代わりに、明示的な `Op` ペイロードで `POST /history/apply` を呼びます。
-
-HTTP エンドポイントを順に叩く代わりに、エージェント向けのアクセスが欲しい場合は [MCP ツールリファレンス](mcp-tools.md) を参照してください。

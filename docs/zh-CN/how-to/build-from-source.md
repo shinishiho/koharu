@@ -12,7 +12,7 @@ title: 从源码构建
 
 - `koharu/` 中的 Rust 应用
 - `ui/` 中嵌入的界面
-- GUI 和 headless 模式共用的本地 HTTP、RPC 和 MCP 服务
+- GUI 和 headless 模式共用的本地 HTTP 与 RPC 服务
 
 默认桌面构建会根据平台自动选择特性路径：
 
@@ -101,4 +101,4 @@ bun cargo build --release -p koharu --features=metal
 - 下载默认的视觉与 OCR 模型
 - 在你之后于设置中选择某个本地翻译 LLM 时，再下载对应模型
 
-如果你想提前下载这些依赖而不真正启动应用，请参见 [以 GUI、Headless 与 MCP 模式运行](run-gui-headless-and-mcp.md)。
+如果你想提前下载这些依赖而不真正启动应用，请参见 [以 GUI 与 Headless 模式运行](run-gui-and-headless.md)。

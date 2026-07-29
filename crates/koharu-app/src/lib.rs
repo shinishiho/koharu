@@ -3,7 +3,6 @@
 //!
 //! See [`crate::app::App`] for the entry point.
 
-pub mod ai;
 pub mod app;
 pub mod archive;
 pub mod autosave;
@@ -19,7 +18,6 @@ pub mod renderer;
 pub mod session;
 pub mod utils;
 
-pub use ai::AiManager;
 pub use app::{App, AppSharedState};
 pub use blobs::BlobStore;
 pub use config::AppConfig;

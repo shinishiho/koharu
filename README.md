@@ -40,7 +40,7 @@ Under the hood, Koharu uses [candle](https://github.com/huggingface/candle) and 
 - Translation with local or remote LLM backends
 - Advanced text rendering with vertical CJK and RTL support
 - Layered PSD export with editable text
-- Local HTTP API and MCP server for automation
+- Local HTTP API for scripting and automation
 
 For installation and first-run guidance, see [Install Koharu](https://koharu.rs/how-to/install-koharu/) and [Translate Your First Page](https://koharu.rs/tutorials/translate-your-first-page/).
 
@@ -76,21 +76,6 @@ Koharu can export the current page either as a flattened rendered image or as a 
 
 For export behavior, PSD contents, and file naming, see [Export Pages and Manage Projects](https://koharu.rs/how-to/export-and-manage-projects/).
 
-### MCP Server
-
-Koharu includes a built-in MCP server for local agent integrations. By default it listens on a random local port, but you can pin it with `--port`.
-
-```bash
-# macOS / Linux
-koharu --port 9999
-# Windows
-koharu.exe --port 9999
-```
-
-Then point your client at `http://localhost:9999/mcp`.
-
-For local setup and the available tools, see [Run GUI, Headless, and MCP Modes](https://koharu.rs/how-to/run-gui-headless-and-mcp/), [Configure MCP Clients](https://koharu.rs/how-to/configure-mcp-clients/), and [MCP Tools Reference](https://koharu.rs/reference/mcp-tools/).
-
 ### Headless Mode
 
 Koharu can run without launching the desktop window.
@@ -104,7 +89,7 @@ koharu.exe --port 4000 --headless
 
 You can then connect to the web client at `http://localhost:4000`.
 
-For runtime modes, ports, and local endpoints, see [Run GUI, Headless, and MCP Modes](https://koharu.rs/how-to/run-gui-headless-and-mcp/).
+For runtime modes, ports, and local endpoints, see [Run GUI and Headless Modes](https://koharu.rs/how-to/run-gui-and-headless/).
 
 ### Runtime Configuration
 
@@ -259,14 +244,6 @@ LLMs are downloaded on demand when you activate a model. For constrained memory 
 Koharu supports hosted APIs from [OpenAI](https://platform.openai.com/), [Gemini](https://ai.google.dev/), [Claude](https://www.anthropic.com/api), and [DeepSeek](https://platform.deepseek.com/) instead of a local GGUF model.
 
 Built-in cloud catalogs include current text-output models for OpenAI, Gemini, Claude, and DeepSeek, including GPT-5.5/5.4/5.x, Gemini 3.1/3/2.5/2.0, Claude Opus/Sonnet/Haiku 4.x, DeepSeek V4, and compatibility aliases such as `deepseek-chat` and `deepseek-reasoner`.
-
-#### Codex Image-to-Image Generation
-
-Koharu can use Codex for end-to-end image-to-image generation. This workflow sends the current source page image plus a user prompt to Codex, then stores the generated image as a rendered page result.
-
-This feature requires a ChatGPT account with Codex access. Two-factor authentication must be enabled on the account before device-code login can complete successfully.
-
-Codex image generation is useful when you want the model to translate visible text, remove the original lettering, and redraw the page in one pass. Because the image request is processed by the ChatGPT Codex backend, failures can include upstream OpenAI request IDs and may need to be retried.
 
 #### Machine Translation Providers
 

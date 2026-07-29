@@ -12,7 +12,7 @@ Um build completo para desktop inclui:
 
 - a aplicação Rust em `koharu/`
 - a UI embutida de `ui/`
-- o servidor HTTP, RPC e MCP local usado tanto pelos modos GUI quanto headless
+- o servidor HTTP e RPC local usado tanto pelos modos GUI quanto headless
 
 O build desktop padrão é ciente de plataforma:
 
@@ -101,4 +101,4 @@ Buildar o app não empacota todo peso de modelo. Na primeira execução, o Kohar
 - baixar os modelos padrão de visão e OCR
 - baixar LLMs locais opcionais de tradução mais tarde, quando você as escolher em Settings
 
-Se você quiser pré-baixar essas dependências sem abrir o app, veja [Executar nos Modos GUI, Headless e MCP](run-gui-headless-and-mcp.md).
+Se você quiser pré-baixar essas dependências sem abrir o app, veja [Executar nos Modos GUI e Headless](run-gui-and-headless.md).

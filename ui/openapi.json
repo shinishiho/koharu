@@ -5,77 +5,6 @@
     "version": ""
   },
   "paths": {
-    "/ai/codex/auth/device-code": {
-      "post": {
-        "operationId": "start_codex_device_login",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CodexDeviceLogin"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/codex/auth/session": {
-      "delete": {
-        "operationId": "delete_codex_session",
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        }
-      }
-    },
-    "/ai/codex/auth/status": {
-      "get": {
-        "operationId": "get_codex_auth_status",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CodexAuthStatus"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/ai/codex/images": {
-      "post": {
-        "operationId": "start_codex_image_generation",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CodexImageGenerationOptions"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CodexImageGenerationResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/blobs/{hash}": {
       "get": {
         "operationId": "get_blob",
@@ -996,7 +925,7 @@
               }
             ],
             "default": {
-              "path": "C:\\Users\\Mayo\\AppData\\Local\\Koharu"
+              "path": "/Users/w/Library/Application Support/Koharu"
             }
           },
           "http": {
@@ -1022,7 +951,7 @@
               "detector": "pp-doclayout-v3",
               "font_detector": "yuzumarker-font-detection",
               "inpainter": "lama-manga",
-              "ocr": "paddle-ocr-vl-1.5",
+              "ocr": "paddle-ocr-vl-1.6",
               "renderer": "koharu-renderer",
               "segmenter": "comic-text-detector-seg",
               "translator": "llm"
@@ -1203,108 +1132,6 @@
       "BlobRef": {
         "type": "string",
         "description": "Hex-encoded blake3 hash of an immutable blob."
-      },
-      "CodexAuthAttemptStatus": {
-        "type": "string",
-        "enum": ["pending", "succeeded", "failed"]
-      },
-      "CodexAuthStatus": {
-        "type": "object",
-        "required": ["signedIn"],
-        "properties": {
-          "accountId": {
-            "type": ["string", "null"]
-          },
-          "login": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/CodexDeviceLoginStatus"
-              }
-            ]
-          },
-          "signedIn": {
-            "type": "boolean"
-          }
-        }
-      },
-      "CodexDeviceLogin": {
-        "type": "object",
-        "required": ["loginId", "verificationUrl", "userCode", "intervalSeconds", "timeoutSeconds"],
-        "properties": {
-          "intervalSeconds": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "loginId": {
-            "type": "string"
-          },
-          "timeoutSeconds": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "userCode": {
-            "type": "string"
-          },
-          "verificationUrl": {
-            "type": "string"
-          }
-        }
-      },
-      "CodexDeviceLoginStatus": {
-        "type": "object",
-        "required": ["loginId", "status"],
-        "properties": {
-          "accountId": {
-            "type": ["string", "null"]
-          },
-          "error": {
-            "type": ["string", "null"]
-          },
-          "loginId": {
-            "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/CodexAuthAttemptStatus"
-          }
-        }
-      },
-      "CodexImageGenerationOptions": {
-        "type": "object",
-        "required": ["pageId", "prompt"],
-        "properties": {
-          "instructions": {
-            "type": ["string", "null"]
-          },
-          "model": {
-            "type": ["string", "null"]
-          },
-          "pageId": {
-            "$ref": "#/components/schemas/PageId"
-          },
-          "prompt": {
-            "type": "string"
-          },
-          "quality": {
-            "type": ["string", "null"]
-          },
-          "size": {
-            "type": ["string", "null"]
-          }
-        }
-      },
-      "CodexImageGenerationResponse": {
-        "type": "object",
-        "required": ["operationId"],
-        "properties": {
-          "operationId": {
-            "type": "string"
-          }
-        }
       },
       "ConfigPatch": {
         "type": "object",
@@ -2596,7 +2423,7 @@
           },
           "ocr": {
             "type": "string",
-            "default": "paddle-ocr-vl-1.5"
+            "default": "paddle-ocr-vl-1.6"
           },
           "renderer": {
             "type": "string",

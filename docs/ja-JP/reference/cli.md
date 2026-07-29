@@ -11,7 +11,6 @@ Koharu は同じバイナリで次の用途を兼ねます。
 - デスクトップ起動
 - headless ローカル Web UI
 - ローカル HTTP API
-- 組み込み MCP サーバー
 
 ## 基本的な使い方
 
@@ -48,7 +47,6 @@ koharu.exe [OPTIONS]
 
 - `http://localhost:<PORT>/`
 - `http://localhost:<PORT>/api/v1`
-- `http://localhost:<PORT>/mcp`
 
 ## よくある使い方
 
@@ -68,18 +66,6 @@ koharu --cpu
 
 ```bash
 koharu --download
-```
-
-固定ポートでローカル MCP エンドポイントを立ち上げる:
-
-```bash
-koharu --port 9999
-```
-
-その上で、MCP クライアントを次に接続します。
-
-```text
-http://localhost:9999/mcp
 ```
 
 明示的にデバッグログ付きで起動する:

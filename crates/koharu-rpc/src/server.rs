@@ -21,10 +21,9 @@ use crate::api;
 /// Returning `None` signals a 404 fall-through.
 pub type AssetResolver = Arc<dyn Fn(&str) -> Option<(Vec<u8>, String)> + Send + Sync>;
 
-/// Wrap `router(app)` with CORS + mount MCP at `/mcp`.
+/// Wrap `router(app)` with permissive CORS for local clients.
 pub fn router_for(app: AppState) -> Router {
-    let base = api::router(app.clone()).layer(CorsLayer::very_permissive());
-    crate::mcp::mount(base, app)
+    api::router(app).layer(CorsLayer::very_permissive())
 }
 
 /// Same as `router_for` but installs `resolver` as a fallback, serving

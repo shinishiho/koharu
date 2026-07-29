@@ -128,5 +128,5 @@ zensical build -f docs/zensical.pt-BR.toml
 ## 関連ページ
 
 - [ソースからビルドする](../how-to/build-from-source.md)
-- [GUI / Headless / MCP モードを使う](../how-to/run-gui-headless-and-mcp.md)
+- [GUI / Headless モードを使う](../how-to/run-gui-and-headless.md)
 - [トラブルシューティング](../how-to/troubleshooting.md)

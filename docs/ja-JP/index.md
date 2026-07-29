@@ -1,7 +1,7 @@
 ---
 title: 概要
 social_title: Koharu
-description: Koharu は Rust 製の local-first な漫画翻訳ツールです。OCR、inpainting、ローカル / リモート LLM、Web UI、MCP 自動化に対応しています。
+description: Koharu は Rust 製の local-first な漫画翻訳ツールです。OCR、inpainting、ローカル / リモート LLM、Web UI に対応しています。
 hide:
   - navigation
   - toc
@@ -309,35 +309,6 @@ hide:
     padding-top: 3.8rem;
   }
 
-  .kh-mcp-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 2rem;
-  }
-
-  .kh-mcp-card {
-    display: grid;
-    gap: 0.65rem;
-    padding: 1.2rem;
-    border: 1px solid var(--kh-panel-border);
-    border-radius: 1rem;
-    background: var(--kh-panel);
-    box-shadow: none;
-  }
-
-  .kh-mcp-card h3 {
-    font-size: 0.9rem;
-    font-weight: 800;
-    line-height: 1.3;
-  }
-
-  .kh-mcp-card p {
-    color: var(--kh-muted);
-    font-size: 0.84rem;
-    line-height: 1.6;
-  }
-
   .kh-dev__lead {
     display: grid;
     justify-items: center;
@@ -409,7 +380,6 @@ hide:
 
   @media screen and (max-width: 76rem) {
     .kh-command-grid,
-    .kh-mcp-grid,
     .kh-resource-panel__grid {
       grid-template-columns: 1fr;
     }
@@ -547,36 +517,6 @@ koharu.exe --port 4000 --headless</code></pre>
     </div>
   </section>
 
-  <section class="kh-section">
-    <div class="kh-shell">
-      <div class="kh-section__header">
-        <div class="kh-kicker">MCP 連携</div>
-        <h2>モデルとページデータをローカルに置いたまま、エージェントから Koharu を操作できます。</h2>
-        <p>
-          Koharu には MCP サポートがあるため、デスクトップ編集、headless モード、エージェントワークフローのすべてが、
-          別々のスタックに分かれず同じローカル翻訳ランタイムを共有できます。
-        </p>
-      </div>
-
-      <div class="kh-mcp-grid">
-        <div class="kh-mcp-card">
-          <h3>1 つのランタイム、複数の入口</h3>
-          <p>
-            同じページパイプラインをデスクトップ UI、headless Web UI、MCP ツールで共有できるため、
-            自動化だけが通常の編集セッションと別挙動になるのを防げます。
-          </p>
-        </div>
-        <div class="kh-mcp-card">
-          <h3>エージェント向けの翻訳タスク</h3>
-          <p>
-            OCR、クリーンアップ、翻訳、ページ単位の出力にアクセスする補助ツールや、
-            バッチ翻訳、レビュー反復、export 作業をエージェントに任せられます。
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="kh-dev">
     <div class="kh-shell">
       <div class="kh-dev__lead">
@@ -585,7 +525,7 @@ koharu.exe --port 4000 --headless</code></pre>
         <h2>ローカルでビルドし、同じデスクトップランタイムを自分のツールに組み込めます。</h2>
         <p>
           Koharu は開発もしやすく、組み込みにも向いています。Bun と Rust でソースビルドし、
-          安定したランタイムフラグを使い、必要に応じて headless モードや MCP をローカル自動化に再利用できます。
+          安定したランタイムフラグを使い、必要に応じて headless モードをローカル自動化に再利用できます。
         </p>
       </div>
 
@@ -615,13 +555,13 @@ bun run build</code></pre>
             <div class="kh-resource-card__eyebrow">自動化</div>
             <div class="kh-resource-card__copy">
               Koharu をより大きなローカルワークフローに組み込みたいときは、
-              同じページパイプラインを headless モードや MCP 経由で再利用できます。
+              同じページパイプラインを headless モードの HTTP API 経由で再利用できます。
             </div>
             <div class="kh-chip-list">
               <span class="kh-chip">デスクトップアプリ</span>
               <span class="kh-chip">Headless mode</span>
               <span class="kh-chip">ローカル Web UI</span>
-              <span class="kh-chip">MCP エージェント連携</span>
+              <span class="kh-chip">HTTP API ワークフロー</span>
               <span class="kh-chip">ローカル統合</span>
             </div>
           </div>

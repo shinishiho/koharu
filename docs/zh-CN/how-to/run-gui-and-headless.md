@@ -1,10 +1,10 @@
 ---
-title: 以 GUI、Headless 与 MCP 模式运行
+title: 以 GUI 与 Headless 模式运行
 ---
 
-# 以 GUI、Headless 与 MCP 模式运行
+# 以 GUI 与 Headless 模式运行
 
-Koharu 可以作为普通桌面应用运行，也可以作为带 Web UI 的 headless 本地服务运行，还可以作为面向 AI Agent 的 MCP 服务器运行。这三者不是不同后端，而是都建立在同一个本地运行时和 HTTP 服务之上。
+Koharu 可以作为普通桌面应用运行，也可以作为带 Web UI 的 headless 本地服务运行。两种模式都使用同一个本地运行时和 HTTP 服务。
 
 ## 各种模式下不变的部分
 
@@ -14,7 +14,7 @@ Koharu 可以作为普通桌面应用运行，也可以作为带 Web UI 的 head
 - UI 与 API 由同一个本地进程提供
 - 页面管线、模型加载与导出使用同一套内部代码路径
 
-正因为如此，桌面编辑、headless 自动化和 MCP 工具才会保持一致。
+正因为如此，桌面编辑与 headless 自动化会保持一致。
 
 ## 模式概览
 
@@ -22,7 +22,6 @@ Koharu 可以作为普通桌面应用运行，也可以作为带 Web UI 的 head
 | --- | --- | --- | --- |
 | Desktop | 有 | 有 | 正常交互式编辑 |
 | Headless | 无 | 有 | 本地 Web UI、脚本、自动化 |
-| MCP | 可选 | 有 | 通过 `/mcp` 给 Agent 使用 |
 
 ## 运行桌面应用
 
@@ -50,7 +49,7 @@ Headless 模式会一直以前台进程方式运行，通常通过 `Ctrl+C` 停�
 
 ## 使用固定端口
 
-默认情况下，Koharu 会选择一个随机本地端口。当你需要稳定地址用于书签、脚本、反向代理或 MCP 客户端时，请使用 `--port`。
+默认情况下，Koharu 会选择一个随机本地端口。当你需要稳定地址用于书签、脚本、反向代理或 API 客户端时，请使用 `--port`。
 
 ```bash
 # macOS / Linux
@@ -78,32 +77,12 @@ koharu --host 0.0.0.0 --port 4000 --headless
 
 - Web UI：`http://localhost:9999/`
 - RPC / HTTP API：`http://localhost:9999/api/v1`
-- MCP 服务器：`http://localhost:9999/mcp`
 
 请把 `9999` 替换成你实际使用的端口。
 
 因为 Koharu 默认只绑定到 loopback，这些端点默认只能本机访问。如果你需要让另一台机器访问，需要你自己通过网络层把端口暴露出去。
 
 端点细节请参见 [HTTP API 参考](../reference/http-api.md)。
-
-## 连接 MCP 服务器
-
-Koharu 内置 MCP 服务器，使用与应用其余部分相同的已加载文档、模型和页面管线。
-
-让 MCP 客户端或 Agent 连接：
-
-`http://localhost:9999/mcp`
-
-这适合希望让 Agent：
-
-- 检查文本块
-- 执行 OCR 或翻译
-- 导出渲染页面
-- 自动化复查或批处理流程
-
-不同客户端的接入方式请看 [配置 MCP 客户端](configure-mcp-clients.md)。
-
-内置工具列表请看 [MCP 工具参考](../reference/mcp-tools.md)。
 
 ## 强制使用 CPU
 

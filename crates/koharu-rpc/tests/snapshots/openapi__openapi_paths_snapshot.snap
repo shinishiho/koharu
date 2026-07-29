@@ -1,32 +1,8 @@
 ---
-source: koharu-rpc/tests/openapi.rs
+source: crates/koharu-rpc/tests/openapi.rs
 expression: paths
 ---
 [
-    (
-        "/ai/codex/auth/device-code",
-        [
-            "post",
-        ],
-    ),
-    (
-        "/ai/codex/auth/session",
-        [
-            "delete",
-        ],
-    ),
-    (
-        "/ai/codex/auth/status",
-        [
-            "get",
-        ],
-    ),
-    (
-        "/ai/codex/images",
-        [
-            "post",
-        ],
-    ),
     (
         "/blobs/{hash}",
         [

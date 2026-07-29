@@ -18,7 +18,7 @@ http://127.0.0.1:<PORT>/api/v1
 
 - API 与 GUI 或 headless 运行时由同一个进程提供
 - 服务器默认绑定到 `127.0.0.1`；使用 `--host` 可绑定到其他地址
-- API 与 MCP 服务器共享同一个已加载的项目、模型和管线状态
+- API 与 Web UI 共享同一个已加载的项目、模型和管线状态
 - 没有提供 `--port` 时，Koharu 会选择一个随机本地端口
 - 在应用完成启动之前，除 `/api/v1/downloads`、`/api/v1/operations` 与 `/api/v1/events` 之外的所有路由都会返回 `503 Service Unavailable`
 
@@ -231,5 +231,3 @@ GET /events
 6. `POST /projects/current/export`，`format = "rendered"` 或 `"psd"`
 
 如果你需要更精细的控制，可以直接 `POST /history/apply` 携带显式 `Op` 负载，而不是运行整条管线。
-
-如果你更想用面向 Agent 的接口，而不是手动编排 HTTP 端点，请参见 [MCP 工具参考](mcp-tools.md)。

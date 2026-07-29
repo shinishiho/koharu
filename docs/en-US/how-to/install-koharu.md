@@ -69,7 +69,7 @@ Once Koharu launches successfully, the next decisions are usually:
 
 See:
 
-- [Run GUI, Headless, and MCP Modes](run-gui-headless-and-mcp.md)
+- [Run GUI and Headless Modes](run-gui-and-headless.md)
 - [Models and Providers](../explanation/models-and-providers.md)
 - [Export Pages and Manage Projects](export-and-manage-projects.md)
 - [Troubleshooting](troubleshooting.md)

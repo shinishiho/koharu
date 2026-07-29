@@ -1,10 +1,10 @@
 ---
-title: Run GUI, Headless, and MCP Modes
+title: Run GUI and Headless Modes
 ---
 
-# Run GUI, Headless, and MCP Modes
+# Run GUI and Headless Modes
 
-Koharu can run as a normal desktop app, a headless local server with a Web UI, or an MCP server for AI agents. These are not separate backends. They all sit on top of the same local runtime and HTTP server.
+Koharu can run as a normal desktop app or as a headless local server with a Web UI. Both modes use the same local runtime and HTTP server.
 
 ## What stays the same across modes
 
@@ -14,7 +14,7 @@ No matter how you launch Koharu, the runtime model is the same:
 - the UI and API are served by the same local process
 - the page pipeline, model loading, and exports use the same internal code paths
 
-That is why desktop editing, headless automation, and MCP tooling stay aligned.
+That is why desktop editing and headless automation stay aligned.
 
 ## Mode summary
 
@@ -22,7 +22,6 @@ That is why desktop editing, headless automation, and MCP tooling stay aligned.
 | --- | --- | --- | --- |
 | Desktop | yes | yes | normal interactive editing |
 | Headless | no | yes | local Web UI, scripting, automation |
-| MCP | optional | yes | agent tooling through `/mcp` |
 
 ## Run the desktop app
 
@@ -50,7 +49,7 @@ Headless mode stays in the foreground until you stop it, typically with `Ctrl+C`
 
 ## Run with a fixed port
 
-By default, Koharu uses a random local port. Use `--port` when you need a stable address for bookmarks, scripts, reverse proxies, or MCP clients.
+By default, Koharu uses a random local port. Use `--port` when you need a stable address for bookmarks, scripts, reverse proxies, or API clients.
 
 ```bash
 # macOS / Linux
@@ -78,32 +77,12 @@ When Koharu is running on a fixed port, the main endpoints are:
 
 - Web UI: `http://localhost:9999/`
 - RPC / HTTP API: `http://localhost:9999/api/v1`
-- MCP server: `http://localhost:9999/mcp`
 
 Replace `9999` with the port you chose.
 
 Because Koharu binds to loopback, these endpoints are local by default. If you want access from another machine, you need to expose that port yourself through your own network setup.
 
 For endpoint-level details, see [HTTP API Reference](../reference/http-api.md).
-
-## Connect to the MCP server
-
-Koharu includes a built-in MCP server that uses the same loaded documents, models, and page pipeline as the rest of the app.
-
-Point your MCP client or agent at:
-
-`http://localhost:9999/mcp`
-
-This is useful when you want an agent to:
-
-- inspect text blocks
-- run OCR or translation
-- export rendered pages
-- automate review or batch workflows
-
-For client-specific setup examples, see [Configure MCP Clients](configure-mcp-clients.md).
-
-For the built-in tool list itself, see [MCP Tools Reference](../reference/mcp-tools.md).
 
 ## Force CPU mode
 

@@ -99,7 +99,6 @@
     "processing": "처리",
     "mask": "마스크",
     "llm": "LLM",
-    "ai": "AI",
     "render": "렌더"
   },
   "layers": {
@@ -197,22 +196,6 @@
       "be-BY": "벨라루스어",
       "hu-HU": "헝가리어"
     }
-  },
-  "ai": {
-    "model": "모델",
-    "prompt": "프롬프트",
-    "generate": "이미지 생성",
-    "noPage": "먼저 페이지를 선택해야 합니다.",
-    "signIn": "로그인",
-    "signOut": "로그아웃",
-    "signedIn": "로그인됨",
-    "signedOut": "로그아웃됨",
-    "signInTitle": "Codex에 로그인",
-    "signInPending": "인증 대기 중...",
-    "signInComplete": "로그인됨",
-    "signInFailed": "로그인 실패",
-    "userCode": "Code",
-    "openBrowser": "탐색기 열기"
   },
   "render": {
     "effectLabel": "텍스트 효과",
@@ -352,10 +335,6 @@
     "deviceMl": "ML 컴퓨팅",
     "apiKeys": "API 키",
     "apiKeysDescription": "다양한 제공자에 대한 API 키를 관리합니다. 키는 장치 키체인에 안전하게 저장되며 누구와도 공유되지 않습니다.",
-    "ai": "AI",
-    "codex": "Codex",
-    "codexDescription": "이미지 생성을 위해 ChatGPT Codex 계정으로 로그인하세요.",
-    "codexTwoFactorDescription": "로그인 전 ChatGPT 계정의 2단계 인증(2FA)을 활성화하세요. Codex 기기 코드 로그인을 완료하려면 2단계 인증이 필수입니다.",
     "freeTier": "무료 등급",
     "localLlm": "로컬 LLM",
     "localLlmTitle": "로컬 LLM",

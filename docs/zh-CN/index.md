@@ -1,7 +1,7 @@
 ---
 title: 概览
 social_title: Koharu 中文文档
-description: Koharu 是一款用 Rust 编写的本地优先漫画翻译工具，支持 OCR、修复、本地与远程 LLM、Web UI 以及 MCP 自动化。
+description: Koharu 是一款用 Rust 编写的本地优先漫画翻译工具，支持 OCR、修复、本地与远程 LLM 以及 Web UI。
 hide:
   - navigation
   - toc
@@ -309,35 +309,6 @@ hide:
     padding-top: 3.8rem;
   }
 
-  .kh-mcp-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 2rem;
-  }
-
-  .kh-mcp-card {
-    display: grid;
-    gap: 0.65rem;
-    padding: 1.2rem;
-    border: 1px solid var(--kh-panel-border);
-    border-radius: 1rem;
-    background: var(--kh-panel);
-    box-shadow: none;
-  }
-
-  .kh-mcp-card h3 {
-    font-size: 0.9rem;
-    font-weight: 800;
-    line-height: 1.3;
-  }
-
-  .kh-mcp-card p {
-    color: var(--kh-muted);
-    font-size: 0.84rem;
-    line-height: 1.6;
-  }
-
   .kh-dev__lead {
     display: grid;
     justify-items: center;
@@ -409,7 +380,6 @@ hide:
 
   @media screen and (max-width: 76rem) {
     .kh-command-grid,
-    .kh-mcp-grid,
     .kh-resource-panel__grid {
       grid-template-columns: 1fr;
     }
@@ -546,36 +516,6 @@ koharu.exe --port 4000 --headless</code></pre>
     </div>
   </section>
 
-  <section class="kh-section">
-    <div class="kh-shell">
-      <div class="kh-section__header">
-        <div class="kh-kicker">MCP 集成</div>
-        <h2>让代理驱动 Koharu，同时把模型和页面数据保留在本地。</h2>
-        <p>
-          Koharu 内置 MCP 支持，因此桌面编辑、Headless 模式和代理工作流都可以接入同一套本地翻译运行时，
-          而不是拆成几套彼此割裂的系统。
-        </p>
-      </div>
-
-      <div class="kh-mcp-grid">
-        <div class="kh-mcp-card">
-          <h3>一套运行时，多个入口</h3>
-          <p>
-            同一套页面流水线既可以服务桌面 UI，也可以服务 Headless Web UI 和 MCP 工具，
-            因此自动化流程不会偏离 Koharu 在正常编辑会话中的实际行为。
-          </p>
-        </div>
-        <div class="kh-mcp-card">
-          <h3>适合代理的翻译任务</h3>
-          <p>
-            你可以用代理处理批量翻译、校对循环、导出以及辅助工具，只要它们需要访问 OCR、清理、
-            翻译和页面级输出即可。
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="kh-dev">
     <div class="kh-shell">
       <div class="kh-dev__lead">
@@ -584,7 +524,7 @@ koharu.exe --port 4000 --headless</code></pre>
         <h2>在本地构建，并把同一套桌面运行时接入你自己的工具链。</h2>
         <p>
           Koharu 易于开发，也易于集成：使用 Bun 和 Rust 从源码构建，复用稳定的运行时参数，
-          并在需要本地自动化时直接接入 Headless 模式或 MCP。
+          并在需要本地自动化时直接使用 Headless 模式。
         </p>
       </div>
 
@@ -613,13 +553,13 @@ bun run build</code></pre>
           <div class="kh-resource-card">
             <div class="kh-resource-card__eyebrow">自动化</div>
             <div class="kh-resource-card__copy">
-              当 Koharu 需要参与更大的本地工作流时，可以在 Headless 模式或通过 MCP 复用同一套页面流水线。
+              当 Koharu 需要参与更大的本地工作流时，可以在 Headless 模式下通过 HTTP API 复用同一套页面流水线。
             </div>
             <div class="kh-chip-list">
               <span class="kh-chip">桌面应用</span>
               <span class="kh-chip">Headless 模式</span>
               <span class="kh-chip">本地 Web UI</span>
-              <span class="kh-chip">MCP 代理工作流</span>
+              <span class="kh-chip">HTTP API 工作流</span>
               <span class="kh-chip">本地集成</span>
             </div>
           </div>

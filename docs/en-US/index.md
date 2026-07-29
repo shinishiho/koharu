@@ -1,7 +1,7 @@
 ---
 title: Overview
 social_title: Koharu
-description: Koharu is a local-first manga translator built in Rust with OCR, inpainting, local and remote LLM support, a Web UI, and MCP automation.
+description: Koharu is a local-first manga translator built in Rust with OCR, inpainting, local and remote LLM support, and a Web UI.
 hide:
   - navigation
   - toc
@@ -309,35 +309,6 @@ hide:
     padding-top: 3.8rem;
   }
 
-  .kh-mcp-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    margin-top: 2rem;
-  }
-
-  .kh-mcp-card {
-    display: grid;
-    gap: 0.65rem;
-    padding: 1.2rem;
-    border: 1px solid var(--kh-panel-border);
-    border-radius: 1rem;
-    background: var(--kh-panel);
-    box-shadow: none;
-  }
-
-  .kh-mcp-card h3 {
-    font-size: 0.9rem;
-    font-weight: 800;
-    line-height: 1.3;
-  }
-
-  .kh-mcp-card p {
-    color: var(--kh-muted);
-    font-size: 0.84rem;
-    line-height: 1.6;
-  }
-
   .kh-dev__lead {
     display: grid;
     justify-items: center;
@@ -409,7 +380,6 @@ hide:
 
   @media screen and (max-width: 76rem) {
     .kh-command-grid,
-    .kh-mcp-grid,
     .kh-resource-panel__grid {
       grid-template-columns: 1fr;
     }
@@ -549,37 +519,6 @@ koharu.exe --port 4000 --headless</code></pre>
     </div>
   </section>
 
-  <section class="kh-section">
-    <div class="kh-shell">
-      <div class="kh-section__header">
-        <div class="kh-kicker">MCP Integration</div>
-        <h2>Let agents drive Koharu while models and page data stay on the local machine.</h2>
-        <p>
-          Koharu includes MCP support so the desktop UI, headless mode, and agent
-          workflows all talk to the same local translation runtime instead of drifting
-          into separate stacks.
-        </p>
-      </div>
-
-      <div class="kh-mcp-grid">
-        <div class="kh-mcp-card">
-          <h3>One runtime, multiple entry points</h3>
-          <p>
-            The same page pipeline powers the desktop UI, the headless Web UI, and MCP
-            tools, so automation stays aligned with normal editing sessions.
-          </p>
-        </div>
-        <div class="kh-mcp-card">
-          <h3>Agent-friendly translation tasks</h3>
-          <p>
-            Use agents for batch translation, review loops, exports, and helper tooling
-            that needs access to OCR, cleanup, translation, and page-level outputs.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <section class="kh-dev">
     <div class="kh-shell">
       <div class="kh-dev__lead">
@@ -589,7 +528,7 @@ koharu.exe --port 4000 --headless</code></pre>
         <p>
           Koharu is designed to be practical to build and practical to integrate. Use
           Bun and Rust for local builds, stable runtime flags for deployment, and
-          headless mode or MCP when you need automation around the app.
+          headless mode when you need automation around the app.
         </p>
       </div>
 
@@ -620,14 +559,14 @@ bun run build</code></pre>
           <div class="kh-resource-card">
             <div class="kh-resource-card__eyebrow">Automation</div>
             <div class="kh-resource-card__copy">
-              Reuse the same page pipeline in headless mode or through MCP when Koharu
-              needs to participate in larger local workflows.
+              Reuse the same page pipeline through the HTTP API in headless mode when
+              Koharu needs to participate in larger local workflows.
             </div>
             <div class="kh-chip-list">
               <span class="kh-chip">Desktop app</span>
               <span class="kh-chip">Headless mode</span>
               <span class="kh-chip">Local Web UI</span>
-              <span class="kh-chip">MCP agent workflows</span>
+              <span class="kh-chip">HTTP API workflows</span>
               <span class="kh-chip">Local integrations</span>
             </div>
           </div>

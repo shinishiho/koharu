@@ -18,7 +18,7 @@ Comportamento atual importante:
 
 - a API é servida pelo mesmo processo da GUI ou do runtime headless
 - o servidor faz bind em `127.0.0.1` por padrão; use `--host` para fazer bind em outro lugar
-- a API e o servidor MCP compartilham o mesmo projeto carregado, modelos e estado do pipeline
+- a API e a Web UI compartilham o mesmo projeto carregado, modelos e estado do pipeline
 - quando nenhum `--port` é fornecido, o Koharu escolhe uma porta local aleatória
 - tudo, exceto `/api/v1/downloads`, `/api/v1/operations` e `/api/v1/events`, retorna `503 Service Unavailable` até o app terminar a inicialização
 
@@ -231,5 +231,3 @@ A ordem normal da API para um projeto novo é:
 6. `POST /projects/current/export` com `format = "rendered"` ou `"psd"`
 
 Para controle mais fino, faça `POST /history/apply` com payloads `Op` explícitos em vez de rodar um pipeline completo.
-
-Se você prefere acesso orientado a agentes em vez de orquestrar endpoints HTTP, veja a [Referência das ferramentas MCP](mcp-tools.md).
