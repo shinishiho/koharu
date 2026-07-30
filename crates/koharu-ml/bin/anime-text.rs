@@ -45,8 +45,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Variant::N)]
     variant: Variant,
 
-    /// Defaults to the threshold upstream ships with the export (ONNX only),
-    /// then to 0.25.
+    /// Defaults to the threshold upstream ships with the export, then to 0.25.
     #[arg(long)]
     confidence_threshold: Option<f32>,
 
@@ -55,12 +54,6 @@ struct Cli {
 
     #[arg(long, default_value_t = false)]
     cpu: bool,
-
-    /// Run the upstream ONNX export instead of the candle graph. Needs HF
-    /// access to the gated `deepghs/AnimeText_yolo` repo.
-    #[cfg(feature = "onnx")]
-    #[arg(long, default_value_t = false)]
-    onnx: bool,
 }
 
 fn main() -> Result<()> {
@@ -91,13 +84,6 @@ async fn async_main() -> Result<()> {
     )?;
     runtime.prepare().await?;
 
-    #[cfg(feature = "onnx")]
-    let model = if cli.onnx {
-        AnimeTextDetector::load_onnx(&runtime, variant, cli.cpu).await?
-    } else {
-        AnimeTextDetector::load_variant(&runtime, variant, cli.cpu).await?
-    };
-    #[cfg(not(feature = "onnx"))]
     let model = AnimeTextDetector::load_variant(&runtime, variant, cli.cpu).await?;
     let bytes = std::fs::read(&cli.input)?;
     let format = image::guess_format(&bytes)?;

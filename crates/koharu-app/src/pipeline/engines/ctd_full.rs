@@ -69,7 +69,7 @@ inventory::submit! {
         needs: &[],
         produces: &[Artifact::TextBoxes, Artifact::SegmentMask],
         load: |runtime, cpu| Box::pin(async move {
-            let m = ComicTextDetector::load_onnx(runtime, cpu).await?;
+            let m = ComicTextDetector::load(runtime, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

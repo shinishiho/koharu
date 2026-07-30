@@ -2,7 +2,7 @@
 //!
 //! ogkalu's export carries the same checkpoint koharu ships as safetensors —
 //! `model.model.fc.weight` is bit-identical to `fffonion`'s — but runs
-//! upstream's own graph. The hand-ported candle backbone drifts: on a constant
+//! upstream's own graph. koharu's hand-ported backbone used to drift: on a constant
 //! grey 512² input, where preprocessing cannot differ, the two disagree on
 //! text colour by 4/255 and on rotation by 0.3°. Same weights, so this path is
 //! the faithful one.
@@ -58,9 +58,9 @@ impl OnnxFontDetector {
     /// One forward pass over a `(batch, 3, 512, 512)` f32 batch, returning one
     /// row of [`OUTPUT_WIDTH`] values per image.
     ///
-    /// Takes the candle tensor the parent module already built so both backends
-    /// share one preprocessing implementation — a resize kernel difference here
-    /// would show up as a different font.
+    /// Takes the tensor the parent module already built, so preprocessing
+    /// stays in one place — a resize kernel difference here would show up as a
+    /// different font.
     pub(super) fn forward(&self, batch: &Tensor) -> Result<Vec<Vec<f32>>> {
         let (count, _, height, width) = batch.dims4()?;
         let values = batch.flatten_all()?.to_vec1::<f32>()?;

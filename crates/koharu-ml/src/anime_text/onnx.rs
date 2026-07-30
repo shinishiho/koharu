@@ -2,7 +2,7 @@
 //!
 //! `model.onnx` is deepghs' own Ultralytics export of the same weights koharu
 //! already ships as safetensors — verified box-identical (IoU 0.9999, score
-//! delta 4e-4) against the candle path. It carries no NMS, so this module owns
+//! delta 4e-4) against the safetensors weights. It carries no NMS, so this owns
 //! only the forward pass; decode, suppression and letterbox-unmapping stay in
 //! the parent module.
 //!
@@ -21,9 +21,9 @@ use super::{AnimeTextYoloVariant, INPUT_SIZE, Letterboxed};
 use crate::onnx::{OnnxSession, blank_image_input, ort_err};
 
 /// deepghs' export, one directory per variant. Gated (`gated: auto`): users
-/// accept the terms once, then koharu needs a token. Kept separate from
-/// `mayocream/anime-text-yolo` (ungated, safetensors) so the candle path keeps
-/// working with no account at all.
+/// accept the terms once, then koharu needs a token, which Settings takes.
+/// This is the only source for these weights now, so the engine does not run
+/// without an account.
 const HF_REPO: &str = "deepghs/AnimeText_yolo";
 
 koharu_runtime::declare_hf_model_package!(
@@ -144,6 +144,19 @@ impl OnnxDetector {
 
 fn variant_directory(variant: AnimeTextYoloVariant) -> String {
     format!("yolo12{}_animetext", variant.as_str())
+}
+
+/// Download one variant's graph without building a session.
+pub(super) async fn prefetch(
+    runtime: &RuntimeManager,
+    variant: AnimeTextYoloVariant,
+) -> Result<()> {
+    let directory = variant_directory(variant);
+    runtime
+        .downloads()
+        .huggingface_model(HF_REPO, &format!("{directory}/model.onnx"))
+        .await?;
+    Ok(())
 }
 
 /// Read the export's recommended confidence threshold.

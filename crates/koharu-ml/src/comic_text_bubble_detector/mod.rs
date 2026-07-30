@@ -1,19 +1,14 @@
-mod model;
-#[cfg(feature = "onnx")]
 mod onnx;
 
 use std::{collections::BTreeMap, time::Instant};
 
-use anyhow::{Context, Result, bail};
-use candle_core::DType;
-use image::{DynamicImage, GenericImageView, imageops::FilterType};
+use anyhow::{Context, Result};
+use image::{DynamicImage, GenericImageView};
 use koharu_runtime::RuntimeManager;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::{Device, device, loading, types::TextRegion};
-
-use self::model::{RTDetrV2ForObjectDetection, RTDetrV2Outputs};
+use crate::{loading, types::TextRegion};
 
 const HF_REPO: &str = "ogkalu/comic-text-and-bubble-detector";
 const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.3;
@@ -33,66 +28,18 @@ koharu_runtime::declare_hf_model_package!(
     bootstrap: false,
     order: 114,
 );
-koharu_runtime::declare_hf_model_package!(
-    id: "model:comic-text-bubble-detector:weights",
-    repo: "ogkalu/comic-text-and-bubble-detector",
-    file: "model.safetensors",
-    bootstrap: false,
-    order: 115,
-);
-
 pub struct ComicTextBubbleDetector {
-    backend: Backend,
+    model: onnx::OnnxDetector,
     config: RTDetrV2Config,
     preprocessor: RTDetrImageProcessorConfig,
     slicer: ImageSlicer,
 }
 
-enum Backend {
-    Candle {
-        model: RTDetrV2ForObjectDetection,
-        device: Device,
-        dtype: DType,
-    },
-    #[cfg(feature = "onnx")]
-    Onnx(onnx::OnnxDetector),
-}
-
 impl ComicTextBubbleDetector {
     pub async fn load(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
         let (config, preprocessor) = Self::load_configs(runtime).await?;
-        let device = device(cpu)?;
-        let dtype = loading::model_dtype(&device);
-        let weights_path = runtime
-            .downloads()
-            .huggingface_model(HF_REPO, "model.safetensors")
-            .await?;
-        let model = loading::load_mmaped_safetensors_path_with_dtype(
-            &weights_path,
-            &device,
-            dtype,
-            |vb| RTDetrV2ForObjectDetection::load(vb, &config),
-        )?;
-
         Ok(Self {
-            backend: Backend::Candle {
-                model,
-                device,
-                dtype,
-            },
-            config,
-            preprocessor,
-            slicer: ImageSlicer::default(),
-        })
-    }
-
-    /// Same detector, run through ONNX Runtime on the upstream `detector.onnx`
-    /// deploy export instead of the hand-ported candle graph.
-    #[cfg(feature = "onnx")]
-    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
-        let (config, preprocessor) = Self::load_configs(runtime).await?;
-        Ok(Self {
-            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, cpu).await?),
+            model: onnx::OnnxDetector::load(runtime, cpu).await?,
             config,
             preprocessor,
             slicer: ImageSlicer::default(),
@@ -110,7 +57,6 @@ impl ComicTextBubbleDetector {
 
         let config = loading::read_json::<RTDetrV2Config>(&config_path)
             .with_context(|| format!("failed to parse {}", config_path.display()))?;
-        config.validate()?;
         let preprocessor = loading::read_json::<RTDetrImageProcessorConfig>(&preprocessor_path)
             .with_context(|| format!("failed to parse {}", preprocessor_path.display()))?;
         Ok((config, preprocessor))
@@ -160,43 +106,8 @@ impl ComicTextBubbleDetector {
         image: &DynamicImage,
         threshold: f32,
     ) -> Result<Vec<ComicTextBubbleRegion>> {
-        match &self.backend {
-            Backend::Candle {
-                model,
-                device,
-                dtype,
-            } => {
-                let pixel_values = preprocess_image(image, &self.preprocessor, device, *dtype)?;
-
-                // Wrap the forward pass and post-processing in a closure so we can capture
-                // any errors without returning from the outer function immediately.
-                let inference_result = (|| -> Result<Vec<ComicTextBubbleRegion>> {
-                    let outputs = model.forward(&pixel_values)?;
-                    post_process_object_detection(
-                        &self.config,
-                        &outputs,
-                        image.dimensions(),
-                        threshold,
-                    )
-                })();
-
-                // EXPLICIT VRAM CLEANUP
-                // This is now guaranteed to run even if the forward pass fails and returns an Err
-                drop(pixel_values);
-
-                // Force the CUDA device to flush its command queue and release memory
-                // back to the OS so Vulkan (llama.cpp) can safely use it.
-                if device.is_cuda() {
-                    let _ = device.synchronize();
-                }
-
-                inference_result
-            }
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => {
-                detector.detect(image, threshold, &self.config, &self.preprocessor)
-            }
-        }
+        self.model
+            .detect(image, threshold, &self.config, &self.preprocessor)
     }
 }
 
@@ -228,108 +139,18 @@ impl ComicTextBubbleRegion {
     }
 }
 
-#[allow(dead_code)]
+/// Upstream's `config.json`, trimmed to what inference needs. The rest of it
+/// described the backbone koharu used to build by hand; the ONNX graph carries
+/// its own architecture.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RTDetrV2Config {
-    #[serde(default = "default_activation_dropout")]
-    pub activation_dropout: f64,
-    #[serde(default = "default_activation_function")]
-    pub activation_function: String,
-    #[serde(default)]
-    pub anchor_image_size: Option<Vec<usize>>,
-    #[serde(default = "default_attention_dropout")]
-    pub attention_dropout: f64,
-    #[serde(default)]
-    pub backbone_config: RTDetrResNetConfig,
-    #[serde(default = "default_batch_norm_eps")]
-    pub batch_norm_eps: f64,
-    #[serde(default = "default_d_model")]
-    pub d_model: usize,
-    #[serde(default = "default_decoder_activation_function")]
-    pub decoder_activation_function: String,
-    #[serde(default = "default_decoder_attention_heads")]
-    pub decoder_attention_heads: usize,
-    #[serde(default = "default_decoder_ffn_dim")]
-    pub decoder_ffn_dim: usize,
-    #[serde(default = "default_decoder_in_channels")]
-    pub decoder_in_channels: Vec<usize>,
-    #[serde(default = "default_decoder_layers")]
-    pub decoder_layers: usize,
-    #[serde(default = "default_decoder_n_levels")]
-    pub decoder_n_levels: usize,
-    #[serde(default = "default_decoder_n_points")]
-    pub decoder_n_points: usize,
-    #[serde(default = "default_decoder_offset_scale")]
-    pub decoder_offset_scale: f64,
-    #[serde(default = "default_decoder_method")]
-    pub decoder_method: String,
-    #[serde(default = "default_dropout")]
-    pub dropout: f64,
-    #[serde(default = "default_encode_proj_layers")]
-    pub encode_proj_layers: Vec<usize>,
-    #[serde(default = "default_encoder_activation_function")]
-    pub encoder_activation_function: String,
-    #[serde(default = "default_encoder_attention_heads")]
-    pub encoder_attention_heads: usize,
-    #[serde(default = "default_encoder_ffn_dim")]
-    pub encoder_ffn_dim: usize,
-    #[serde(default = "default_encoder_hidden_dim")]
-    pub encoder_hidden_dim: usize,
-    #[serde(default = "default_encoder_in_channels")]
-    pub encoder_in_channels: Vec<usize>,
-    #[serde(default = "default_encoder_layers")]
-    pub encoder_layers: usize,
-    #[serde(default = "default_feature_strides", alias = "feature_strides")]
-    pub feat_strides: Vec<usize>,
-    #[serde(default = "default_freeze_backbone_batch_norms")]
-    pub freeze_backbone_batch_norms: bool,
-    #[serde(default = "default_hidden_expansion")]
-    pub hidden_expansion: f64,
     #[serde(default)]
     pub id2label: BTreeMap<String, String>,
-    #[serde(default = "default_layer_norm_eps")]
-    pub layer_norm_eps: f64,
-    #[serde(default = "default_learn_initial_query")]
-    pub learn_initial_query: bool,
-    #[serde(default = "default_normalize_before")]
-    pub normalize_before: bool,
-    #[serde(default = "default_num_feature_levels")]
-    pub num_feature_levels: usize,
     #[serde(default = "default_num_labels")]
     pub num_labels: usize,
-    #[serde(default = "default_num_queries")]
-    pub num_queries: usize,
-    #[serde(default = "default_positional_encoding_temperature")]
-    pub positional_encoding_temperature: usize,
-    #[serde(default = "default_true")]
-    pub use_focal_loss: bool,
-    #[serde(default = "default_true")]
-    pub with_box_refine: bool,
 }
 
 impl RTDetrV2Config {
-    pub(crate) fn validate(&self) -> Result<()> {
-        if self.backbone_config.layer_type != "bottleneck" {
-            bail!(
-                "unsupported RT-DETR backbone layer_type {:?}; only bottleneck is supported",
-                self.backbone_config.layer_type
-            );
-        }
-        if self.learn_initial_query {
-            bail!("learn_initial_query=true is not supported");
-        }
-        if !self.with_box_refine {
-            bail!("with_box_refine=false is not supported");
-        }
-        if self.decoder_method != "default" {
-            bail!(
-                "unsupported RT-DETR decoder method {:?}; only default is supported",
-                self.decoder_method
-            );
-        }
-        Ok(())
-    }
-
     pub(crate) fn num_labels(&self) -> usize {
         self.num_labels.max(self.id2label.len()).max(1)
     }
@@ -343,83 +164,7 @@ impl RTDetrV2Config {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct RTDetrResNetConfig {
-    #[serde(default = "default_num_channels")]
-    pub num_channels: usize,
-    #[serde(default = "default_embedding_size")]
-    pub embedding_size: usize,
-    #[serde(default = "default_hidden_sizes")]
-    pub hidden_sizes: Vec<usize>,
-    #[serde(default = "default_depths")]
-    pub depths: Vec<usize>,
-    #[serde(default = "default_layer_type")]
-    pub layer_type: String,
-    #[serde(default = "default_hidden_act")]
-    pub hidden_act: String,
-    #[serde(default)]
-    pub downsample_in_first_stage: bool,
-    #[serde(default)]
-    pub downsample_in_bottleneck: bool,
-    #[serde(default = "default_out_features")]
-    pub out_features: Vec<String>,
-}
-
-impl Default for RTDetrResNetConfig {
-    fn default() -> Self {
-        Self {
-            num_channels: default_num_channels(),
-            embedding_size: default_embedding_size(),
-            hidden_sizes: default_hidden_sizes(),
-            depths: default_depths(),
-            layer_type: default_layer_type(),
-            hidden_act: default_hidden_act(),
-            downsample_in_first_stage: false,
-            downsample_in_bottleneck: false,
-            out_features: default_out_features(),
-        }
-    }
-}
-
-impl RTDetrResNetConfig {
-    pub(crate) fn channels(&self) -> Result<Vec<usize>> {
-        let mut channels = Vec::with_capacity(self.out_features.len());
-        for feature in &self.out_features {
-            if feature == "stem" {
-                channels.push(self.embedding_size);
-                continue;
-            }
-            let Some(stage) = feature.strip_prefix("stage") else {
-                bail!("unsupported RT-DETR backbone out_feature {:?}", feature);
-            };
-            let stage_index = stage.parse::<usize>().with_context(|| {
-                format!("failed to parse RT-DETR backbone out_feature {:?}", feature)
-            })?;
-            let hidden_index = stage_index
-                .checked_sub(1)
-                .context("stage indices must start at 1")?;
-            let channels_for_stage = self
-                .hidden_sizes
-                .get(hidden_index)
-                .copied()
-                .with_context(|| format!("missing hidden size for stage {}", stage_index))?;
-            channels.push(channels_for_stage);
-        }
-        Ok(channels)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RTDetrImageProcessorConfig {
-    #[serde(default = "default_true")]
-    pub do_resize: bool,
-    #[serde(default = "default_true")]
-    pub do_rescale: bool,
-    #[serde(default)]
-    pub do_normalize: bool,
-    #[serde(default = "default_image_mean")]
-    pub image_mean: [f32; 3],
-    #[serde(default = "default_image_std")]
-    pub image_std: [f32; 3],
     #[serde(default = "default_rescale_factor")]
     pub rescale_factor: f32,
     #[serde(default = "default_processor_size")]
@@ -432,109 +177,6 @@ pub(crate) struct ProcessorSize {
     pub height: usize,
     #[serde(default = "default_processor_width")]
     pub width: usize,
-}
-
-fn preprocess_image(
-    image: &DynamicImage,
-    preprocessor: &RTDetrImageProcessorConfig,
-    device: &Device,
-    dtype: DType,
-) -> Result<candle_core::Tensor> {
-    let target_h = preprocessor.size.height;
-    let target_w = preprocessor.size.width;
-    let resized = if preprocessor.do_resize {
-        image.resize_exact(target_w as u32, target_h as u32, FilterType::Triangle)
-    } else {
-        image.clone()
-    };
-    let rgb = resized.to_rgb8();
-    let tensor =
-        candle_core::Tensor::from_vec(rgb.into_raw(), (1, target_h, target_w, 3), &Device::Cpu)?
-            .to_device(device)?
-            .permute((0, 3, 1, 2))?
-            .to_dtype(dtype)?;
-    let tensor = if preprocessor.do_rescale {
-        tensor.affine(preprocessor.rescale_factor as f64, 0.0)?
-    } else {
-        tensor
-    };
-    if preprocessor.do_normalize {
-        let mean = candle_core::Tensor::from_slice(&preprocessor.image_mean, (1, 3, 1, 1), device)?
-            .to_dtype(dtype)?;
-        let std = candle_core::Tensor::from_slice(&preprocessor.image_std, (1, 3, 1, 1), device)?
-            .to_dtype(dtype)?;
-        Ok(tensor.broadcast_sub(&mean)?.broadcast_div(&std)?)
-    } else {
-        Ok(tensor)
-    }
-}
-
-fn post_process_object_detection(
-    config: &RTDetrV2Config,
-    outputs: &RTDetrV2Outputs,
-    target_size: (u32, u32),
-    threshold: f32,
-) -> Result<Vec<ComicTextBubbleRegion>> {
-    let logits = outputs
-        .logits
-        .to_dtype(DType::F32)?
-        .to_device(&Device::Cpu)?;
-    let pred_boxes = outputs
-        .pred_boxes
-        .to_dtype(DType::F32)?
-        .to_device(&Device::Cpu)?;
-    let (batch_size, num_queries, num_classes) = logits.dims3()?;
-    if batch_size != 1 {
-        bail!("only single-image inference is supported, got batch_size={batch_size}");
-    }
-    if num_classes != config.num_labels() {
-        bail!(
-            "model output label count mismatch: expected {}, got {}",
-            config.num_labels(),
-            num_classes
-        );
-    }
-
-    let logits = logits.flatten_all()?.to_vec1::<f32>()?;
-    let pred_boxes = pred_boxes.flatten_all()?.to_vec1::<f32>()?;
-    let mut scored = Vec::with_capacity(num_queries * num_classes);
-    for query_index in 0..num_queries {
-        for class_id in 0..num_classes {
-            let index = query_index * num_classes + class_id;
-            scored.push((sigmoid_scalar(logits[index]), query_index, class_id));
-        }
-    }
-    scored.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
-    scored.truncate(num_queries);
-
-    let (image_width, image_height) = target_size;
-    let image_width = image_width as f32;
-    let image_height = image_height as f32;
-    let mut detections = Vec::new();
-    for (score, query_index, class_id) in scored {
-        if score < threshold {
-            continue;
-        }
-        let box_offset = query_index * 4;
-        let bbox = scale_box_to_image(
-            [
-                pred_boxes[box_offset],
-                pred_boxes[box_offset + 1],
-                pred_boxes[box_offset + 2],
-                pred_boxes[box_offset + 3],
-            ],
-            image_width,
-            image_height,
-        );
-        detections.push(ComicTextBubbleRegion {
-            label_id: class_id,
-            label: config.label(class_id),
-            score,
-            bbox,
-        });
-    }
-
-    Ok(detections)
 }
 
 fn detections_to_text_blocks(
@@ -699,23 +341,6 @@ fn clamp_box(bbox: [f32; 4], image_width: f32, image_height: f32) -> [f32; 4] {
     ]
 }
 
-fn scale_box_to_image(box_cxcywh: [f32; 4], image_width: f32, image_height: f32) -> [f32; 4] {
-    let center_x = box_cxcywh[0] * image_width;
-    let center_y = box_cxcywh[1] * image_height;
-    let width = box_cxcywh[2] * image_width;
-    let height = box_cxcywh[3] * image_height;
-    [
-        (center_x - width * 0.5).clamp(0.0, image_width),
-        (center_y - height * 0.5).clamp(0.0, image_height),
-        (center_x + width * 0.5).clamp(0.0, image_width),
-        (center_y + height * 0.5).clamp(0.0, image_height),
-    ]
-}
-
-fn sigmoid_scalar(value: f32) -> f32 {
-    1.0 / (1.0 + (-value).exp())
-}
-
 fn calculate_iou(rect1: &[f32; 4], rect2: &[f32; 4]) -> f32 {
     let x1 = rect1[0].max(rect2[0]);
     let y1 = rect1[1].max(rect2[1]);
@@ -855,176 +480,8 @@ impl ImageSlicer {
     }
 }
 
-const fn default_true() -> bool {
-    true
-}
-
-const fn default_num_channels() -> usize {
-    3
-}
-
-const fn default_embedding_size() -> usize {
-    64
-}
-
-fn default_hidden_sizes() -> Vec<usize> {
-    vec![256, 512, 1024, 2048]
-}
-
-fn default_depths() -> Vec<usize> {
-    vec![3, 4, 6, 3]
-}
-
-fn default_layer_type() -> String {
-    "bottleneck".to_string()
-}
-
-fn default_hidden_act() -> String {
-    "relu".to_string()
-}
-
-fn default_activation_function() -> String {
-    "silu".to_string()
-}
-
-fn default_decoder_activation_function() -> String {
-    "relu".to_string()
-}
-
-fn default_encoder_activation_function() -> String {
-    "gelu".to_string()
-}
-
-const fn default_activation_dropout() -> f64 {
-    0.0
-}
-
-const fn default_attention_dropout() -> f64 {
-    0.0
-}
-
-const fn default_batch_norm_eps() -> f64 {
-    1e-5
-}
-
-const fn default_d_model() -> usize {
-    256
-}
-
-const fn default_decoder_attention_heads() -> usize {
-    8
-}
-
-const fn default_decoder_ffn_dim() -> usize {
-    1024
-}
-
-fn default_decoder_in_channels() -> Vec<usize> {
-    vec![256, 256, 256]
-}
-
-const fn default_decoder_layers() -> usize {
-    6
-}
-
-const fn default_decoder_n_levels() -> usize {
-    3
-}
-
-const fn default_decoder_n_points() -> usize {
-    4
-}
-
-const fn default_decoder_offset_scale() -> f64 {
-    0.5
-}
-
-fn default_decoder_method() -> String {
-    "default".to_string()
-}
-
-const fn default_dropout() -> f64 {
-    0.0
-}
-
-fn default_encode_proj_layers() -> Vec<usize> {
-    vec![2]
-}
-
-const fn default_encoder_attention_heads() -> usize {
-    8
-}
-
-const fn default_encoder_ffn_dim() -> usize {
-    1024
-}
-
-const fn default_encoder_hidden_dim() -> usize {
-    256
-}
-
-fn default_encoder_in_channels() -> Vec<usize> {
-    vec![512, 1024, 2048]
-}
-
-const fn default_encoder_layers() -> usize {
-    1
-}
-
-fn default_feature_strides() -> Vec<usize> {
-    vec![8, 16, 32]
-}
-
-const fn default_freeze_backbone_batch_norms() -> bool {
-    true
-}
-
-const fn default_hidden_expansion() -> f64 {
-    1.0
-}
-
-const fn default_layer_norm_eps() -> f64 {
-    1e-5
-}
-
-const fn default_learn_initial_query() -> bool {
-    false
-}
-
-const fn default_normalize_before() -> bool {
-    false
-}
-
-const fn default_num_feature_levels() -> usize {
-    3
-}
-
 const fn default_num_labels() -> usize {
     3
-}
-
-const fn default_num_queries() -> usize {
-    300
-}
-
-const fn default_positional_encoding_temperature() -> usize {
-    10_000
-}
-
-fn default_out_features() -> Vec<String> {
-    vec![
-        "stage2".to_string(),
-        "stage3".to_string(),
-        "stage4".to_string(),
-    ]
-}
-
-fn default_image_mean() -> [f32; 3] {
-    [0.485, 0.456, 0.406]
-}
-
-fn default_image_std() -> [f32; 3] {
-    [0.229, 0.224, 0.225]
 }
 
 const fn default_rescale_factor() -> f32 {

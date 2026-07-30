@@ -28,11 +28,6 @@ struct Cli {
 
     #[arg(long, default_value_t = false)]
     cpu: bool,
-
-    /// Run the ONNX Runtime backend instead of the candle one.
-    #[cfg(feature = "onnx")]
-    #[arg(long, default_value_t = false)]
-    onnx: bool,
 }
 
 fn overlay_stroke_radius(width: u32, height: u32) -> i32 {
@@ -279,13 +274,6 @@ async fn async_main() -> Result<()> {
     )?;
     runtime.prepare().await?;
 
-    #[cfg(feature = "onnx")]
-    let model = if cli.onnx {
-        ComicTextBubbleDetector::load_onnx(&runtime, cli.cpu).await?
-    } else {
-        ComicTextBubbleDetector::load(&runtime, cli.cpu).await?
-    };
-    #[cfg(not(feature = "onnx"))]
     let model = ComicTextBubbleDetector::load(&runtime, cli.cpu).await?;
     let bytes = std::fs::read(&cli.input)?;
     let format = image::guess_format(&bytes)?;

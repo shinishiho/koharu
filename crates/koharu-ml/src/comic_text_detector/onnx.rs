@@ -2,13 +2,13 @@
 //!
 //! dmMaze's export puts all three heads koharu ports by hand — YOLOv5 boxes,
 //! the U-Net mask, DBNet's shrink/threshold pair — in one graph, and its output
-//! convention already matches the candle heads: boxes as `cxcywh` in input
+//! convention is the one the postprocessing expects: boxes as `cxcywh` in input
 //! pixels with objectness and class scores, and all three maps post-sigmoid in
 //! [0, 1]. So this module owns only the forward pass; decode, fusion and
 //! morphology stay in the parent module.
 //!
 //! One behavioural difference: the graph's input is fixed at 1024², so the CPU
-//! path cannot drop to 640 the way the candle path does.
+//! graph is fixed at 1024², so CPU pays the full size too.
 
 use anyhow::{Context, Result, bail};
 use candle_core::{Device, Tensor};
@@ -29,6 +29,15 @@ koharu_runtime::declare_hf_model_package!(
     bootstrap: false,
     order: 113,
 );
+
+/// Download the graph without building a session.
+pub(super) async fn prefetch(runtime: &RuntimeManager) -> Result<()> {
+    runtime
+        .downloads()
+        .huggingface_model(HF_REPO, MODEL_FILE)
+        .await?;
+    Ok(())
+}
 
 #[derive(Debug)]
 pub(super) struct OnnxDetector {
@@ -53,7 +62,7 @@ impl OnnxDetector {
     }
 
     /// One pass over a `[1, 3, 1024, 1024]` f32 image, returning
-    /// `(boxes, mask, shrink_threshold)` shaped exactly as the candle heads
+    /// `(boxes, mask, shrink_threshold)` shaped exactly as the postprocessing
     /// produce them: `[1, anchors, 5 + classes]`, `[1, 1, h, w]`, `[1, 2, h, w]`.
     pub(super) fn forward(&self, image: &Tensor) -> Result<(Tensor, Tensor, Tensor)> {
         let (batch, channels, height, width) = image.dims4()?;

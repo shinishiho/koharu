@@ -89,7 +89,7 @@ fn spawn_detector(
         // Initialize an isolated single-threaded runtime strictly for this OS thread
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async move {
-            let loaded = ComicTextBubbleDetector::load_onnx(&runtime, cpu).await;
+            let loaded = ComicTextBubbleDetector::load(&runtime, cpu).await;
 
             // The CUDA context is now permanently tied to this specific thread
             let detector = match loaded {

@@ -56,7 +56,7 @@ inventory::submit! {
             // `deepghs/AnimeText_yolo` is gated: this load fails with an
             // actionable 401 until the user accepts the terms and adds a
             // HuggingFace token in settings.
-            let m = AnimeTextDetector::load_onnx(runtime, AnimeTextYoloVariant::N, cpu).await?;
+            let m = AnimeTextDetector::load_variant(runtime, AnimeTextYoloVariant::N, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

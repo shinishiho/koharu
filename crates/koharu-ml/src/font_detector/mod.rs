@@ -1,31 +1,21 @@
 use std::{fs, path::PathBuf, time::Instant};
 
-use crate::{device, loading};
 use anyhow::{Context, Result};
 use candle_core::{DType, Device, Tensor};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use koharu_runtime::RuntimeManager;
 use rayon::prelude::*;
 
-mod models;
-#[cfg(feature = "onnx")]
 mod onnx;
-
-pub use models::ModelKind;
 
 pub(super) const FONT_COUNT: usize = 6_150;
 const REGRESSION_START: usize = FONT_COUNT + 2;
 pub(super) const REGRESSION_DIM: usize = 10;
 
+/// Only the labels come from here now — the weights this repo also carries
+/// were for the candle backbone, which is gone.
 const HF_REPO: &str = "fffonion/yuzumarker-font-detection";
 
-koharu_runtime::declare_hf_model_package!(
-    id: "model:font-detector:weights",
-    repo: "fffonion/yuzumarker-font-detection",
-    file: "yuzumarker-font-detection.safetensors",
-    bootstrap: false,
-    order: 140,
-);
 koharu_runtime::declare_hf_model_package!(
     id: "model:font-detector:labels",
     repo: "fffonion/yuzumarker-font-detection",
@@ -37,104 +27,18 @@ koharu_runtime::declare_hf_model_package!(
 pub use crate::types::{FontPrediction, NamedFontPrediction, TextDirection, TopFont};
 
 pub struct FontDetector {
-    backend: Backend,
+    model: onnx::OnnxFontDetector,
     labels: FontLabels,
 }
 
-enum Backend {
-    Candle {
-        model: models::Model,
-        device: Device,
-        dtype: DType,
-    },
-    #[cfg(feature = "onnx")]
-    Onnx(onnx::OnnxFontDetector),
-}
-
 impl FontDetector {
-    pub async fn load(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
-        Self::load_with_kind(runtime, cpu, ModelKind::default()).await
-    }
-
-    pub async fn load_with_kind(
-        runtime: &RuntimeManager,
-        cpu: bool,
-        kind: ModelKind,
-    ) -> Result<Self> {
-        let device = device(cpu)?;
-        let dtype = loading::model_dtype(&device);
-        let downloads = runtime.downloads();
-        let weights_path = downloads
-            .huggingface_model(HF_REPO, "yuzumarker-font-detection.safetensors")
-            .await?;
-        let model = loading::load_mmaped_safetensors_path_with_dtype(
-            &weights_path,
-            &device,
-            dtype,
-            move |vb| models::Model::load(vb.pp("model._orig_mod.model"), kind),
-        )?;
-        let labels = FontLabels::load(runtime).await?;
-
-        Ok(Self {
-            backend: Backend::Candle {
-                model,
-                device,
-                dtype,
-            },
-            labels,
-        })
-    }
-
-    /// Same checkpoint, run through ONNX Runtime on ogkalu's export instead of
-    /// the hand-ported candle backbone.
-    ///
     /// Labels still come from the safetensors repo — the ONNX repo ships only
     /// the graph.
-    #[cfg(feature = "onnx")]
-    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
+    pub async fn load(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
         Ok(Self {
-            backend: Backend::Onnx(onnx::OnnxFontDetector::load(runtime, cpu).await?),
+            model: onnx::OnnxFontDetector::load(runtime, cpu).await?,
             labels: FontLabels::load(runtime).await?,
         })
-    }
-
-    fn input_size(&self) -> usize {
-        match &self.backend {
-            Backend::Candle { model, .. } => model.input_size(),
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(_) => onnx::INPUT_SIZE,
-        }
-    }
-
-    /// One row per image: font logits, two direction logits, then the
-    /// regression block already squashed into [0, 1].
-    ///
-    /// The ONNX graph sigmoids the regression block itself, so the candle path
-    /// does the same here rather than leaving it to the decoder — one
-    /// convention, no per-backend branch downstream.
-    fn forward(&self, batch: &Tensor) -> Result<Vec<Vec<f32>>> {
-        match &self.backend {
-            Backend::Candle {
-                model,
-                device,
-                dtype,
-            } => {
-                let batch = batch.to_device(device)?.to_dtype(*dtype)?;
-                let mut rows = model
-                    .forward(&batch, false)?
-                    .to_dtype(DType::F32)?
-                    .to_device(&Device::Cpu)?
-                    .to_vec2::<f32>()?;
-                for row in &mut rows {
-                    for value in &mut row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM] {
-                        *value = sigmoid_scalar(*value);
-                    }
-                }
-                Ok(rows)
-            }
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => detector.forward(batch),
-        }
     }
 
     pub fn inference(&self, images: &[DynamicImage], top_k: usize) -> Result<Vec<FontPrediction>> {
@@ -143,7 +47,7 @@ impl FontDetector {
         }
 
         let started = Instant::now();
-        let input_size = self.input_size();
+        let input_size = onnx::INPUT_SIZE;
         let original_sizes = images
             .iter()
             .map(|image| image.dimensions().0)
@@ -159,7 +63,7 @@ impl FontDetector {
         let preprocess_elapsed = preprocess_started.elapsed();
 
         let forward_started = Instant::now();
-        let rows = self.forward(&batch)?;
+        let rows = self.model.forward(&batch)?;
         let forward_elapsed = forward_started.elapsed();
 
         let postprocess_started = Instant::now();
@@ -347,8 +251,4 @@ fn insert_ranked(best: &mut Vec<(usize, f32)>, candidate: (usize, f32), limit: u
     } else if best.len() < limit {
         best.push(candidate);
     }
-}
-
-fn sigmoid_scalar(value: f32) -> f32 {
-    1.0 / (1.0 + (-value).exp())
 }

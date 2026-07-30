@@ -1,9 +1,5 @@
-mod dbnet;
-#[cfg(feature = "onnx")]
 mod onnx;
 mod postprocess;
-mod unet;
-mod yolo_v5;
 
 use std::cmp;
 
@@ -14,14 +10,13 @@ use image::{DynamicImage, GenericImageView, GrayImage};
 use koharu_runtime::RuntimeManager;
 use tracing::instrument;
 
-use crate::{device, loading, types::TextRegion};
+use crate::types::TextRegion;
 
 pub use postprocess::{
     ComicTextDetection, Quad, crop_text_block_bbox, expanded_text_block_crop_bounds,
     extract_text_block_regions, refine_segmentation_mask,
 };
 
-const HF_REPO: &str = "mayocream/comic-text-detector";
 const CONFIDENCE_THRESHOLD: f32 = 0.4;
 const NMS_THRESHOLD: f32 = 0.35;
 const DBNET_BINARIZE_K: f64 = 50.0;
@@ -29,117 +24,17 @@ const BINARY_THRESHOLD: u8 = 60;
 const DILATION_RADIUS: u32 = 3;
 const HOLE_CLOSE_RADIUS: u32 = 10;
 const BBOX_DILATION: f32 = 1.0;
-const GPU_DETECT_SIZE: u32 = 1024;
-const CPU_DETECT_SIZE: u32 = 640;
-
-koharu_runtime::declare_hf_model_package!(
-    id: "model:comic-text-detector:yolo-v5",
-    repo: HF_REPO,
-    file: "yolo-v5.safetensors",
-    bootstrap: false,
-    order: 110,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:comic-text-detector:unet",
-    repo: HF_REPO,
-    file: "unet.safetensors",
-    bootstrap: false,
-    order: 111,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:comic-text-detector:dbnet",
-    repo: HF_REPO,
-    file: "dbnet.safetensors",
-    bootstrap: false,
-    order: 112,
-);
 
 pub struct ComicTextDetector {
-    backend: Backend,
-}
-
-enum Backend {
-    Candle {
-        yolo: yolo_v5::YoloV5,
-        unet: unet::UNet,
-        dbnet: Option<dbnet::DbNet>,
-        device: Device,
-        dtype: DType,
-    },
-    #[cfg(feature = "onnx")]
-    Onnx(onnx::OnnxDetector),
+    model: onnx::OnnxDetector,
 }
 
 impl ComicTextDetector {
-    pub async fn load(runtime: &RuntimeManager, cpu: bool) -> anyhow::Result<Self> {
-        Self::load_inner(runtime, cpu, true).await
-    }
-
-    pub async fn load_segmentation_only(
-        runtime: &RuntimeManager,
-        cpu: bool,
-    ) -> anyhow::Result<Self> {
-        Self::load_inner(runtime, cpu, false).await
-    }
-
-    async fn load_inner(
-        runtime: &RuntimeManager,
-        cpu: bool,
-        load_dbnet: bool,
-    ) -> anyhow::Result<Self> {
-        let device = device(cpu)?;
-        let dtype = loading::model_dtype(&device);
-        let downloads = runtime.downloads();
-        let yolo_path = downloads
-            .huggingface_model(HF_REPO, "yolo-v5.safetensors")
-            .await?;
-        let yolo =
-            loading::load_mmaped_safetensors_path_with_dtype(&yolo_path, &device, dtype, |vb| {
-                yolo_v5::YoloV5::load(vb, 2, 3)
-            })?;
-        let unet_path = downloads
-            .huggingface_model(HF_REPO, "unet.safetensors")
-            .await?;
-        let unet = loading::load_mmaped_safetensors_path_with_dtype(
-            &unet_path,
-            &device,
-            dtype,
-            unet::UNet::load,
-        )?;
-        let dbnet = if load_dbnet {
-            let dbnet_path = downloads
-                .huggingface_model(HF_REPO, "dbnet.safetensors")
-                .await?;
-            Some(loading::load_mmaped_safetensors_path_with_dtype(
-                &dbnet_path,
-                &device,
-                dtype,
-                dbnet::DbNet::load,
-            )?)
-        } else {
-            None
-        };
-
-        Ok(Self {
-            backend: Backend::Candle {
-                yolo,
-                unet,
-                dbnet,
-                device,
-                dtype,
-            },
-        })
-    }
-
-    /// The same three heads, run through ONNX Runtime on dmMaze's own export
-    /// instead of koharu's hand-ported graphs.
-    ///
-    /// One file covers detection and segmentation both, so there is no
+    /// One graph covers detection and segmentation both, so there is no
     /// segmentation-only variant to load.
-    #[cfg(feature = "onnx")]
-    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> anyhow::Result<Self> {
+    pub async fn load(runtime: &RuntimeManager, cpu: bool) -> anyhow::Result<Self> {
         Ok(Self {
-            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, cpu).await?),
+            model: onnx::OnnxDetector::load(runtime, cpu).await?,
         })
     }
 
@@ -184,69 +79,21 @@ impl ComicTextDetector {
         postprocess_unet_mask(&mask, original_dimensions, resized_dimensions)
     }
 
-    /// Letterbox into the square input the backend expects.
-    ///
-    /// The candle path halves the side on CPU to stay usable; the ONNX graph's
-    /// input is fixed at 1024², so it pays the full size either way.
+    /// Letterbox into the graph's fixed 1024² input.
     fn preprocess(&self, image: &DynamicImage) -> anyhow::Result<(Tensor, (u32, u32))> {
-        match &self.backend {
-            Backend::Candle { device, dtype, .. } => {
-                let size = match device {
-                    Device::Cpu => CPU_DETECT_SIZE,
-                    _ => GPU_DETECT_SIZE,
-                };
-                preprocess(image, device, *dtype, size)
-            }
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(_) => preprocess(image, &Device::Cpu, DType::F32, onnx::INPUT_SIZE),
-        }
+        preprocess(image, &Device::Cpu, DType::F32, onnx::INPUT_SIZE)
     }
 
     #[instrument(level = "debug", skip_all)]
     fn forward(&self, image: &Tensor) -> anyhow::Result<(Tensor, Tensor, Tensor)> {
-        match &self.backend {
-            Backend::Candle {
-                yolo, unet, dbnet, ..
-            } => {
-                let (predictions, features) = yolo.forward(image)?;
-                let (mask, features) = unet.forward(
-                    &features[0],
-                    &features[1],
-                    &features[2],
-                    &features[3],
-                    &features[4],
-                )?;
-                let dbnet = dbnet
-                    .as_ref()
-                    .context("DBNet not loaded; use ComicTextDetector::load for full detection")?;
-                let shrink_thresh = dbnet.forward(&features[0], &features[1], &features[2])?;
-
-                Ok((predictions, mask, shrink_thresh))
-            }
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => detector.forward(image),
-        }
+        self.model.forward(image)
     }
 
+    /// One graph, so the mask comes out of the same pass as everything else —
+    /// the other two outputs are simply dropped.
     #[instrument(level = "debug", skip_all)]
     fn forward_mask(&self, image: &Tensor) -> anyhow::Result<Tensor> {
-        match &self.backend {
-            Backend::Candle { yolo, unet, .. } => {
-                let (_, features) = yolo.forward(image)?;
-                let (mask, _) = unet.forward(
-                    &features[0],
-                    &features[1],
-                    &features[2],
-                    &features[3],
-                    &features[4],
-                )?;
-                Ok(mask)
-            }
-            // One graph, so the mask comes out of the same pass as everything
-            // else — the other two outputs are simply dropped.
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => Ok(detector.forward(image)?.1),
-        }
+        Ok(self.model.forward(image)?.1)
     }
 }
 
@@ -463,27 +310,12 @@ fn morph_close(mask: &Tensor, radius: usize) -> anyhow::Result<Tensor> {
     erode_tensor(&dilated, radius)
 }
 
+/// One graph covers detection and segmentation both, so both entry points
+/// fetch the same file.
 pub async fn prefetch(runtime: &RuntimeManager) -> anyhow::Result<()> {
-    let downloads = runtime.downloads();
-    downloads
-        .huggingface_model(HF_REPO, "yolo-v5.safetensors")
-        .await?;
-    downloads
-        .huggingface_model(HF_REPO, "unet.safetensors")
-        .await?;
-    downloads
-        .huggingface_model(HF_REPO, "dbnet.safetensors")
-        .await?;
-    Ok(())
+    onnx::prefetch(runtime).await
 }
 
 pub async fn prefetch_segmentation(runtime: &RuntimeManager) -> anyhow::Result<()> {
-    let downloads = runtime.downloads();
-    downloads
-        .huggingface_model(HF_REPO, "yolo-v5.safetensors")
-        .await?;
-    downloads
-        .huggingface_model(HF_REPO, "unet.safetensors")
-        .await?;
-    Ok(())
+    prefetch(runtime).await
 }

@@ -1,11 +1,9 @@
-mod model;
-#[cfg(feature = "onnx")]
 mod onnx;
 
-use std::{path::Path, path::PathBuf, time::Instant};
+use std::{path::Path, time::Instant};
 
-use anyhow::{Context, Result, bail};
-use candle_core::{DType, Device, IndexOp, Tensor};
+use anyhow::{Result, bail};
+use candle_core::{IndexOp, Tensor};
 use candle_transformers::object_detection::{Bbox, non_maximum_suppression};
 use image::{
     DynamicImage, Rgb, RgbImage,
@@ -15,11 +13,7 @@ use koharu_runtime::RuntimeManager;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::{device, loading, types::TextRegion};
-
-use self::model::{Yolo12, Yolo12Scale};
-
-pub const HF_REPO: &str = "mayocream/anime-text-yolo";
+use crate::types::TextRegion;
 const INPUT_SIZE: u32 = 640;
 const NUM_CLASSES: usize = 1;
 const DEFAULT_VARIANT: AnimeTextYoloVariant = AnimeTextYoloVariant::N;
@@ -30,42 +24,6 @@ const DEFAULT_NMS_THRESHOLD: f32 = 0.45;
 const LETTERBOX_COLOR: u8 = 114;
 const DETECTOR_NAME: &str = "anime-text-yolo";
 const CLASS_NAMES: [&str; NUM_CLASSES] = ["text_block"];
-
-koharu_runtime::declare_hf_model_package!(
-    id: "model:anime-text-yolo:yolo12n",
-    repo: HF_REPO,
-    file: "yolo12n_animetext.safetensors",
-    bootstrap: false,
-    order: 118,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:anime-text-yolo:yolo12s",
-    repo: HF_REPO,
-    file: "yolo12s_animetext.safetensors",
-    bootstrap: false,
-    order: 119,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:anime-text-yolo:yolo12m",
-    repo: HF_REPO,
-    file: "yolo12m_animetext.safetensors",
-    bootstrap: false,
-    order: 120,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:anime-text-yolo:yolo12l",
-    repo: HF_REPO,
-    file: "yolo12l_animetext.safetensors",
-    bootstrap: false,
-    order: 121,
-);
-koharu_runtime::declare_hf_model_package!(
-    id: "model:anime-text-yolo:yolo12x",
-    repo: HF_REPO,
-    file: "yolo12x_animetext.safetensors",
-    bootstrap: false,
-    order: 122,
-);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -78,16 +36,6 @@ pub enum AnimeTextYoloVariant {
 }
 
 impl AnimeTextYoloVariant {
-    pub fn filename(self) -> &'static str {
-        match self {
-            Self::N => "yolo12n_animetext.safetensors",
-            Self::S => "yolo12s_animetext.safetensors",
-            Self::M => "yolo12m_animetext.safetensors",
-            Self::L => "yolo12l_animetext.safetensors",
-            Self::X => "yolo12x_animetext.safetensors",
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
             Self::N => "n",
@@ -95,16 +43,6 @@ impl AnimeTextYoloVariant {
             Self::M => "m",
             Self::L => "l",
             Self::X => "x",
-        }
-    }
-
-    fn scale(self) -> Yolo12Scale {
-        match self {
-            Self::N => Yolo12Scale::N,
-            Self::S => Yolo12Scale::S,
-            Self::M => Yolo12Scale::M,
-            Self::L => Yolo12Scale::L,
-            Self::X => Yolo12Scale::X,
         }
     }
 }
@@ -117,19 +55,8 @@ impl std::fmt::Display for AnimeTextYoloVariant {
 
 #[derive(Debug)]
 pub struct AnimeTextDetector {
-    backend: Backend,
+    model: onnx::OnnxDetector,
     variant: AnimeTextYoloVariant,
-}
-
-#[derive(Debug)]
-enum Backend {
-    Candle {
-        model: Yolo12,
-        device: Device,
-        dtype: DType,
-    },
-    #[cfg(feature = "onnx")]
-    Onnx(onnx::OnnxDetector),
 }
 
 /// Where the letterboxed image sits inside the square input, so detections can
@@ -167,59 +94,26 @@ impl AnimeTextDetector {
         Self::load_variant(runtime, DEFAULT_VARIANT, cpu).await
     }
 
+    /// The export carries no NMS (`nms: False`), so decode and suppression
+    /// live in this module; only the forward pass is ONNX's.
     pub async fn load_variant(
         runtime: &RuntimeManager,
         variant: AnimeTextYoloVariant,
         cpu: bool,
     ) -> Result<Self> {
-        let weights_path = resolve_model_path(runtime, variant).await?;
-        Self::load_from_path(weights_path, variant, cpu)
-    }
-
-    pub fn load_from_path(
-        weights_path: impl AsRef<Path>,
-        variant: AnimeTextYoloVariant,
-        cpu: bool,
-    ) -> Result<Self> {
-        let device = device(cpu)?;
-        let dtype = loading::model_dtype(&device);
-        let model = loading::load_mmaped_safetensors_path_with_dtype(
-            weights_path.as_ref(),
-            &device,
-            dtype,
-            |vb| Yolo12::load(vb, variant.scale(), NUM_CLASSES),
-        )
-        .with_context(|| {
-            format!(
-                "failed to load anime text YOLO {} weights from {}",
-                variant,
-                weights_path.as_ref().display()
-            )
-        })?;
-
         Ok(Self {
-            backend: Backend::Candle {
-                model,
-                device,
-                dtype,
-            },
+            model: onnx::OnnxDetector::load(runtime, variant, cpu).await?,
             variant,
         })
     }
 
-    /// Same weights, run through ONNX Runtime on the upstream `model.onnx`
-    /// export instead of the hand-ported candle graph.
-    ///
-    /// The export carries no NMS (`nms: False`), so decode and suppression stay
-    /// shared with the candle path — only the forward pass differs.
-    #[cfg(feature = "onnx")]
-    pub async fn load_onnx(
-        runtime: &RuntimeManager,
+    pub fn load_from_path(
+        path: impl AsRef<Path>,
         variant: AnimeTextYoloVariant,
         cpu: bool,
     ) -> Result<Self> {
         Ok(Self {
-            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, variant, cpu).await?),
+            model: onnx::OnnxDetector::load_from_path(path.as_ref(), cpu)?,
             variant,
         })
     }
@@ -229,18 +123,10 @@ impl AnimeTextDetector {
     }
 
     /// The confidence threshold upstream measured as F1-optimal for these
-    /// weights, when the backend ships one.
-    ///
-    /// Only the ONNX path has it: deepghs pins it next to each export, while
-    /// the safetensors repo the candle path uses carries no such file. Both
-    /// backends run the same weights, so a candle user who wants the tuned
-    /// number can pass it explicitly.
+    /// weights. deepghs pins one next to each export; a model loaded straight
+    /// from a path has none, since the file sits beside it in the repo.
     pub fn recommended_confidence(&self) -> Option<f32> {
-        match &self.backend {
-            Backend::Candle { .. } => None,
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => detector.recommended_confidence(),
-        }
+        self.model.recommended_confidence()
     }
 
     #[instrument(level = "debug", skip_all)]
@@ -262,22 +148,7 @@ impl AnimeTextDetector {
     ) -> Result<AnimeTextDetection> {
         let started = Instant::now();
         let letterboxed = letterbox(image);
-        let predictions = match &self.backend {
-            Backend::Candle {
-                model,
-                device,
-                dtype,
-            } => {
-                let input = candle_input(&letterboxed, device, *dtype)?;
-                let outputs = model.forward(&input)?;
-                outputs
-                    .to_dtype(DType::F32)?
-                    .to_device(&Device::Cpu)?
-                    .i(0)?
-            }
-            #[cfg(feature = "onnx")]
-            Backend::Onnx(detector) => detector.forward(&letterboxed)?,
-        };
+        let predictions = self.model.forward(&letterboxed)?;
         let regions = postprocess(
             &predictions,
             &letterboxed.letterbox,
@@ -305,8 +176,7 @@ impl AnimeTextDetector {
     }
 }
 
-/// The letterboxed square input plus the geometry needed to undo it. Shared by
-/// both backends so a box maps back the same way regardless of runtime.
+/// The letterboxed square input plus the geometry needed to undo it.
 pub(crate) struct Letterboxed {
     image: RgbImage,
     letterbox: Letterbox,
@@ -345,18 +215,6 @@ fn letterbox(image: &DynamicImage) -> Letterboxed {
     }
 }
 
-fn candle_input(letterboxed: &Letterboxed, device: &Device, dtype: DType) -> Result<Tensor> {
-    let pixel_values = Tensor::from_slice(
-        letterboxed.image.as_raw(),
-        (1, INPUT_SIZE as usize, INPUT_SIZE as usize, 3),
-        device,
-    )?
-    .permute((0, 3, 1, 2))?
-    .to_dtype(dtype)?;
-
-    Ok((pixel_values * (1.0 / 255.0))?)
-}
-
 pub async fn prefetch(runtime: &RuntimeManager) -> Result<()> {
     prefetch_variant(runtime, DEFAULT_VARIANT).await
 }
@@ -365,23 +223,11 @@ pub async fn prefetch_variant(
     runtime: &RuntimeManager,
     variant: AnimeTextYoloVariant,
 ) -> Result<()> {
-    let _ = resolve_model_path(runtime, variant).await?;
-    Ok(())
-}
-
-async fn resolve_model_path(
-    runtime: &RuntimeManager,
-    variant: AnimeTextYoloVariant,
-) -> Result<PathBuf> {
-    runtime
-        .downloads()
-        .huggingface_model(HF_REPO, variant.filename())
-        .await
-        .with_context(|| format!("failed to download {} from {}", variant.filename(), HF_REPO))
+    onnx::prefetch(runtime, variant).await
 }
 
 /// Decode a `(4 + NUM_CLASSES, anchors)` prediction plane into source-pixel
-/// regions. Backend-agnostic: candle and ONNX both hand over the same plane.
+/// regions.
 fn postprocess(
     pred: &Tensor,
     letterbox: &Letterbox,

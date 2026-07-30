@@ -67,7 +67,7 @@ inventory::submit! {
         needs: &[Artifact::TextBoxes],
         produces: &[Artifact::FontPredictions],
         load: |runtime, cpu| Box::pin(async move {
-            let m = FontDetector::load_onnx(runtime, cpu).await?;
+            let m = FontDetector::load(runtime, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

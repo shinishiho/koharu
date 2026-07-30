@@ -25,12 +25,6 @@ struct Cli {
 
     #[arg(long, default_value_t = false)]
     cpu: bool,
-
-    /// Run dmMaze's ONNX export instead of the candle graphs. Always 1024²,
-    /// even on CPU.
-    #[cfg(feature = "onnx")]
-    #[arg(long, default_value_t = false)]
-    onnx: bool,
 }
 
 fn overlay_stroke_radius(width: u32, height: u32) -> i32 {
@@ -100,13 +94,6 @@ async fn async_main() -> Result<()> {
     )?;
     runtime.prepare().await?;
 
-    #[cfg(feature = "onnx")]
-    let model = if cli.onnx {
-        ComicTextDetector::load_onnx(&runtime, cli.cpu).await?
-    } else {
-        ComicTextDetector::load(&runtime, cli.cpu).await?
-    };
-    #[cfg(not(feature = "onnx"))]
     let model = ComicTextDetector::load(&runtime, cli.cpu).await?;
     let bytes = std::fs::read(&cli.input)?;
     let format = image::guess_format(&bytes)?;
