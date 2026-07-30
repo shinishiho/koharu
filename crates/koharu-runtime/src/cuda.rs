@@ -447,6 +447,9 @@ mod tests {
     use super::*;
 
     #[test]
+    // `source_id` resolves a CUDA wheel platform, which only exists on the
+    // platforms that have wheels — same gate its sibling test already carries.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn source_id_includes_platform() {
         let id = source_id().unwrap();
         assert!(id.contains("cuda"));
