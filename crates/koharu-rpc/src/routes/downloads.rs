@@ -46,7 +46,7 @@ async fn list_downloads(State(app): State<AppState>) -> ApiResult<Json<ListDownl
 #[serde(rename_all = "camelCase")]
 pub struct StartDownloadRequest {
     /// Package id, as declared via `declare_hf_model_package!`
-    /// (e.g. `"model:comic-text-detector:yolo-v5"`).
+    /// (e.g. `"model:comic-text-detector:onnx"`).
     pub model_id: String,
 }
 

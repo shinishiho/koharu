@@ -956,7 +956,7 @@
             ],
             "default": {
               "bubble_segmenter": "speech-bubble-segmentation",
-              "detector": "pp-doclayout-v3",
+              "detector": "koharu-yolo26s",
               "font_detector": "yuzumarker-font-detection",
               "inpainter": "lama-manga",
               "ocr": "paddle-ocr-vl-1.6",
@@ -2441,7 +2441,7 @@
       },
       "PipelineConfig": {
         "type": "object",
-        "description": "Engine selection for each pipeline stage.\nValues are engine IDs (e.g. \"pp-doclayout-v3\", \"comic-text-detector\").\nEmpty string means use default.",
+        "description": "Engine selection for each pipeline stage.\nValues are engine IDs (e.g. \"koharu-yolo26s\", \"comic-text-detector-seg\").\nEmpty string means use default.",
         "properties": {
           "bubble_segmenter": {
             "type": "string",
@@ -2449,7 +2449,7 @@
           },
           "detector": {
             "type": "string",
-            "default": "pp-doclayout-v3"
+            "default": "koharu-yolo26s"
           },
           "font_detector": {
             "type": "string",
@@ -2823,7 +2823,7 @@
         "properties": {
           "modelId": {
             "type": "string",
-            "description": "Package id, as declared via `declare_hf_model_package!`\n(e.g. `\"model:comic-text-detector:yolo-v5\"`)."
+            "description": "Package id, as declared via `declare_hf_model_package!`\n(e.g. `\"model:comic-text-detector:onnx\"`)."
           }
         }
       },

@@ -16,12 +16,14 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Detector {
     /// Structural layout model: text / onomatopoeia / bubble / panel, with
-    /// instance masks — `koharu_ml::koharu_yolo26s`. The model exists; no
-    /// engine feeds it in here yet.
+    /// instance masks — `koharu_ml::koharu_yolo26s`. The `koharu-yolo26s`
+    /// engine runs this one; it is the pipeline's only detector.
     Layout,
-    /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free.
+    /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free. Model only — the
+    /// engine is gone, so nothing feeds this in until fusion runs the models
+    /// itself rather than reading one engine's output.
     RtDetr,
-    /// AnimeText YOLO12x: broad text boxes.
+    /// AnimeText YOLO12x: broad text boxes. Model only, same as `RtDetr`.
     AnimeText,
     /// comic-text-detector: text boxes plus the authoritative pixel mask.
     ComicTextDetector,

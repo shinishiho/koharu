@@ -23,7 +23,7 @@ async fn paddleocr_vl_reads_dialog_image_via_default_block_path() -> anyhow::Res
             [0.0, image.height() as f32],
         ]]),
         source_direction: Some(TextDirection::Horizontal),
-        detector: Some("pp-doclayout-v3".to_string()),
+        detector: Some("koharu-yolo26s".to_string()),
         ..Default::default()
     };
 

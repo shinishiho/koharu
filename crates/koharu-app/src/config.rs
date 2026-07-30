@@ -84,7 +84,7 @@ pub struct HuggingFaceConfig {
 }
 
 /// Engine selection for each pipeline stage.
-/// Values are engine IDs (e.g. "pp-doclayout-v3", "comic-text-detector").
+/// Values are engine IDs (e.g. "koharu-yolo26s", "comic-text-detector-seg").
 /// Empty string means use default.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(default)]
@@ -102,7 +102,7 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            detector: "pp-doclayout-v3".to_string(),
+            detector: "koharu-yolo26s".to_string(),
             font_detector: "yuzumarker-font-detection".to_string(),
             segmenter: "comic-text-detector-seg".to_string(),
             bubble_segmenter: "speech-bubble-segmentation".to_string(),

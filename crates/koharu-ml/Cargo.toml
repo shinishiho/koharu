@@ -104,10 +104,6 @@ name = "font-detect"
 path = "bin/font-detect.rs"
 
 [[bin]]
-name = "pp-doclayout-v3"
-path = "bin/pp-doclayout-v3.rs"
-
-[[bin]]
 name = "manga-text-segmentation-2025"
 path = "bin/manga-text-segmentation-2025.rs"
 

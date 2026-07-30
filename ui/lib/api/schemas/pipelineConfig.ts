@@ -5,7 +5,7 @@
 
 /**
  * Engine selection for each pipeline stage.
- * Values are engine IDs (e.g. "pp-doclayout-v3", "comic-text-detector").
+ * Values are engine IDs (e.g. "koharu-yolo26s", "comic-text-detector-seg").
  * Empty string means use default.
  */
 export interface PipelineConfig {
