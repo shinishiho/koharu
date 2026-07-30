@@ -409,7 +409,7 @@
     "restartApplying": "Applying...",
     "restartRequiredDescription": "These settings are loaded at startup. Applying them will save the config and restart the app.",
     "engines": "Engines",
-    "enginesDescription": "Select which ML engine to use for each pipeline stage.",
+    "enginesDescription": "The models each pipeline stage runs. Stages with a single model are fixed.",
     "detector": "Detector",
     "fontDetector": "Font Detector",
     "segmenter": "Segmenter",

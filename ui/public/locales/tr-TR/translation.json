@@ -391,7 +391,7 @@
     "restartApplying": "Uygulanıyor...",
     "restartRequiredDescription": "Bu ayarlar başlangıçta yüklenir. Uygulamak yapılandırmayı kaydedip uygulamayı yeniden başlatır.",
     "engines": "Motorlar",
-    "enginesDescription": "Her işlem hattı aşaması için kullanılacak ML motorunu seçin.",
+    "enginesDescription": "Her işlem hattı aşamasının çalıştırdığı modeller. Tek modeli olan aşamalar sabittir.",
     "detector": "Algılayıcı",
     "fontDetector": "Font Detector",
     "segmenter": "Bölümleyici",

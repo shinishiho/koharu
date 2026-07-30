@@ -563,26 +563,36 @@ function EnginesPane({
   return (
     <div className='space-y-4'>
       <p className='text-xs text-muted-foreground'>{t('settings.enginesDescription')}</p>
-      {sections.map(({ label, key, engines }) => (
-        <div key={key} className='space-y-1.5'>
-          <Label className='text-xs'>{label}</Label>
-          <Select
-            value={pipeline[key] ?? engines[0]?.id ?? ''}
-            onValueChange={(v) => onChange({ ...pipeline, [key]: v })}
-          >
-            <SelectTrigger className='w-full'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {engines.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ))}
+      {sections.map(({ label, key, engines }) =>
+        // A stage with one engine has nothing to choose: show what runs, not a
+        // dropdown that can only be reselected. Stages regain their control if
+        // a second engine ever registers.
+        engines.length < 2 ? (
+          <div key={key} className='flex items-baseline justify-between gap-2'>
+            <Label className='text-xs'>{label}</Label>
+            <span className='text-xs text-muted-foreground'>{engines[0]?.name ?? '—'}</span>
+          </div>
+        ) : (
+          <div key={key} className='space-y-1.5'>
+            <Label className='text-xs'>{label}</Label>
+            <Select
+              value={pipeline[key] ?? engines[0]?.id ?? ''}
+              onValueChange={(v) => onChange({ ...pipeline, [key]: v })}
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {engines.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ),
+      )}
     </div>
   )
 }

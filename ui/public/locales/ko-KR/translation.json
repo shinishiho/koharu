@@ -396,7 +396,7 @@
     "restartApplying": "적용 중...",
     "restartRequiredDescription": "이 설정은 시작 시 로드됩니다. 적용하면 구성을 저장하고 앱을 다시 시작합니다.",
     "engines": "엔진",
-    "enginesDescription": "각 파이프라인 단계에서 사용할 ML 엔진을 선택합니다.",
+    "enginesDescription": "각 파이프라인 단계가 실행하는 모델입니다. 모델이 하나뿐인 단계는 고정됩니다.",
     "detector": "검출기",
     "fontDetector": "글꼴 검출기",
     "segmenter": "세그멘터",

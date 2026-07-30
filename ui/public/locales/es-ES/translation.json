@@ -391,7 +391,7 @@
     "restartApplying": "Aplicando...",
     "restartRequiredDescription": "Estos ajustes se cargan al iniciar. Aplicarlos guardará la configuración y reiniciará la aplicación.",
     "engines": "Motores",
-    "enginesDescription": "Selecciona qué motor ML usar para cada etapa del pipeline.",
+    "enginesDescription": "Los modelos que ejecuta cada etapa del proceso. Las etapas con un solo modelo son fijas.",
     "detector": "Detector",
     "fontDetector": "Font Detector",
     "segmenter": "Segmentador",
