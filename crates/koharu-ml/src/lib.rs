@@ -12,6 +12,8 @@ pub mod loading;
 pub mod manga_ocr;
 pub mod manga_text_segmentation_2025;
 pub mod mit48px_ocr;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 mod ops;
 pub mod paddleocr_vl;
 pub mod pp_doclayout_v3;

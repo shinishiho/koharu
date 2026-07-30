@@ -4,17 +4,15 @@
 //! plus the original slice size and returns already-decoded `labels`/`boxes`/
 //! `scores` in original pixel coordinates, so the Rust side has no decode step.
 
-use std::{path::Path, sync::Mutex};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use koharu_runtime::RuntimeManager;
-use ort::{
-    session::{Session, builder::GraphOptimizationLevel},
-    value::Tensor,
-};
+use ort::value::Tensor;
 
 use super::{ComicTextBubbleRegion, HF_REPO, RTDetrImageProcessorConfig, RTDetrV2Config};
+use crate::onnx::{OnnxSession, blank_image_input, ort_err};
 
 const ONNX_FILENAME: &str = "detector.onnx";
 
@@ -26,17 +24,8 @@ koharu_runtime::declare_hf_model_package!(
     order: 123,
 );
 
-/// `ort::Error` is neither `Send` nor `Sync` (it can carry a panic payload, and
-/// builder errors hand back the builder), so it cannot cross into `anyhow`
-/// directly.
-fn ort_err<T>(err: ort::Error<T>) -> anyhow::Error {
-    anyhow::anyhow!("onnxruntime: {err}")
-}
-
 pub(super) struct OnnxDetector {
-    // ponytail: `Session::run` needs `&mut self`, so inference is serialized.
-    // Per-thread sessions only if a caller ever wants concurrent pages.
-    session: Mutex<Session>,
+    session: OnnxSession,
 }
 
 impl OnnxDetector {
@@ -49,67 +38,16 @@ impl OnnxDetector {
     }
 
     pub(super) fn load_from_path(path: &Path, cpu: bool) -> Result<Self> {
-        let session = if cpu {
-            Self::commit(path, false)?
-        } else {
-            // The accelerated EPs can claim nodes they cannot actually execute
-            // (CoreML swallows the deformable-attention `GridSample` subgraph
-            // and then fails at compute time), so prove the graph runs before
-            // handing the session out.
-            match Self::commit(path, true).and_then(|session| Self::warmup(session)) {
-                Ok(session) => session,
-                Err(err) => {
-                    tracing::warn!(
-                        "ONNX accelerated execution provider unusable for this graph, falling back to CPU: {err:#}"
-                    );
-                    Self::commit(path, false)?
-                }
-            }
-        };
+        let session = OnnxSession::open(path, cpu, |session| {
+            let images = blank_image_input(640, 640)?;
+            let sizes = Tensor::from_array((vec![1i64, 2], vec![640i64, 640])).map_err(ort_err)?;
+            session
+                .run(ort::inputs!["images" => images, "orig_target_sizes" => sizes])
+                .map_err(ort_err)?;
+            Ok(())
+        })?;
 
-        Ok(Self {
-            session: Mutex::new(session),
-        })
-    }
-
-    fn commit(path: &Path, accelerated: bool) -> Result<Session> {
-        #[allow(unused_mut)]
-        let mut builder = Session::builder()
-            .map_err(ort_err)?
-            .with_optimization_level(GraphOptimizationLevel::Level3)
-            .map_err(ort_err)?;
-
-        if accelerated {
-            #[cfg(target_os = "macos")]
-            {
-                builder = builder
-                    .with_execution_providers([ort::ep::coreml::CoreML::default().build()])
-                    .map_err(ort_err)?;
-            }
-            #[cfg(any(feature = "cuda", feature = "onnx-cuda"))]
-            {
-                builder = builder
-                    .with_execution_providers([ort::ep::cuda::CUDA::default().build()])
-                    .map_err(ort_err)?;
-            }
-        }
-
-        builder
-            .commit_from_file(path)
-            .map_err(ort_err)
-            .with_context(|| format!("failed to load {}", path.display()))
-    }
-
-    /// Runs one blank image through the graph so provider failures surface at
-    /// load time instead of mid-pipeline.
-    fn warmup(mut session: Session) -> Result<Session> {
-        let images = Tensor::from_array((vec![1i64, 3, 640, 640], vec![0f32; 3 * 640 * 640]))
-            .map_err(ort_err)?;
-        let sizes = Tensor::from_array((vec![1i64, 2], vec![640i64, 640])).map_err(ort_err)?;
-        session
-            .run(ort::inputs!["images" => images, "orig_target_sizes" => sizes])
-            .map_err(ort_err)?;
-        Ok(session)
+        Ok(Self { session })
     }
 
     pub(super) fn detect(
@@ -144,55 +82,52 @@ impl OnnxDetector {
         ))
         .map_err(ort_err)?;
 
-        let mut session = self
-            .session
-            .lock()
-            .map_err(|_| anyhow::anyhow!("ONNX session mutex poisoned"))?;
-        let outputs = session
-            .run(ort::inputs![
+        self.session.run(
+            ort::inputs![
                 "images" => images,
                 "orig_target_sizes" => sizes,
-            ])
-            .map_err(ort_err)?;
+            ],
+            |outputs| {
+                let (_, labels) = outputs["labels"]
+                    .try_extract_tensor::<i64>()
+                    .map_err(ort_err)?;
+                let (boxes_shape, boxes) = outputs["boxes"]
+                    .try_extract_tensor::<f32>()
+                    .map_err(ort_err)?;
+                let (_, scores) = outputs["scores"]
+                    .try_extract_tensor::<f32>()
+                    .map_err(ort_err)?;
+                if boxes.len() != labels.len() * 4 || scores.len() != labels.len() {
+                    bail!(
+                        "unexpected ONNX output shapes: labels={} boxes={:?} scores={}",
+                        labels.len(),
+                        boxes_shape,
+                        scores.len()
+                    );
+                }
 
-        let (_, labels) = outputs["labels"]
-            .try_extract_tensor::<i64>()
-            .map_err(ort_err)?;
-        let (boxes_shape, boxes) = outputs["boxes"]
-            .try_extract_tensor::<f32>()
-            .map_err(ort_err)?;
-        let (_, scores) = outputs["scores"]
-            .try_extract_tensor::<f32>()
-            .map_err(ort_err)?;
-        if boxes.len() != labels.len() * 4 || scores.len() != labels.len() {
-            bail!(
-                "unexpected ONNX output shapes: labels={} boxes={:?} scores={}",
-                labels.len(),
-                boxes_shape,
-                scores.len()
-            );
-        }
+                let num_labels = config.num_labels();
+                let mut detections = Vec::new();
+                for (index, (&label, &score)) in labels.iter().zip(scores.iter()).enumerate() {
+                    if score < threshold {
+                        continue;
+                    }
+                    let label_id = usize::try_from(label)
+                        .with_context(|| format!("negative ONNX label id {label}"))?;
+                    if label_id >= num_labels {
+                        bail!("ONNX label id {label_id} exceeds configured {num_labels} labels");
+                    }
+                    let bbox = &boxes[index * 4..index * 4 + 4];
+                    detections.push(ComicTextBubbleRegion {
+                        label_id,
+                        label: config.label(label_id),
+                        score,
+                        bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
+                    });
+                }
 
-        let num_labels = config.num_labels();
-        let mut detections = Vec::new();
-        for (index, (&label, &score)) in labels.iter().zip(scores.iter()).enumerate() {
-            if score < threshold {
-                continue;
-            }
-            let label_id = usize::try_from(label)
-                .with_context(|| format!("negative ONNX label id {label}"))?;
-            if label_id >= num_labels {
-                bail!("ONNX label id {label_id} exceeds configured {num_labels} labels");
-            }
-            let bbox = &boxes[index * 4..index * 4 + 4];
-            detections.push(ComicTextBubbleRegion {
-                label_id,
-                label: config.label(label_id),
-                score,
-                bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
-            });
-        }
-
-        Ok(detections)
+                Ok(detections)
+            },
+        )
     }
 }
