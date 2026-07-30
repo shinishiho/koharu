@@ -81,6 +81,11 @@ name = "comic-text-bubble-detector"
 path = "bin/comic-text-bubble-detector.rs"
 
 [[bin]]
+name = "koharu-layout"
+path = "bin/koharu-layout.rs"
+required-features = ["onnx"]
+
+[[bin]]
 name = "lama"
 path = "bin/lama.rs"
 

@@ -7,6 +7,8 @@ pub mod comic_text_detector;
 pub mod flux2_klein;
 pub mod font_detector;
 pub mod inpainting;
+#[cfg(feature = "onnx")]
+pub mod koharu_layout;
 pub mod lama;
 pub mod loading;
 pub mod manga_ocr;
