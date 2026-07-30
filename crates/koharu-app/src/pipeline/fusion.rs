@@ -16,8 +16,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Detector {
     /// Structural layout model: text / onomatopoeia / bubble / panel, with
-    /// instance masks. No such model is wired up yet — the acceptance rules
-    /// depend on one, so the variant exists ahead of it.
+    /// instance masks — `koharu_ml::koharu_yolo26s`. The model exists; no
+    /// engine feeds it in here yet.
     Layout,
     /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free.
     RtDetr,
@@ -142,11 +142,13 @@ pub fn fuse(
         })
         .collect();
 
-    // AnimeText's own boxes confirm SFX proposals — same rule as the pixel
-    // mask, a second opinion that the rectangle contains glyphs.
+    // Text boxes from anything but the layout model confirm its SFX proposals —
+    // same rule as the pixel mask, a second opinion that the rectangle holds
+    // glyphs. The layout model is excluded from its own confirmation: a
+    // detector agreeing with itself is one vote, not two.
     let text_boxes: Vec<[f32; 4]> = candidates
         .iter()
-        .filter(|c| c.class == Class::Text && c.detector == Detector::AnimeText)
+        .filter(|c| c.class == Class::Text && c.detector != Detector::Layout)
         .map(|c| c.bbox)
         .collect();
 
@@ -167,12 +169,22 @@ pub fn fuse(
                 Some((index, bubble)) if bubble.accepted => (Role::Dialogue, Some(index), true),
                 // Inside a balloon nobody confirmed: keep for OCR, don't erase.
                 Some((index, _)) => (Role::Dialogue, Some(index), false),
+                // An SFX rectangle covers art as often as glyphs, so it takes
+                // two independent things to erase one: the layout model's own
+                // instance mask, which traces the strokes rather than the box,
+                // and glyph evidence from somewhere else — the pixel text mask
+                // or another detector's text box. Either alone stays a
+                // proposal. The mask without a second opinion is only as good
+                // as the class call that produced it, and glyph evidence
+                // without a mask says text is *somewhere* in a rectangle that
+                // may be mostly artwork.
                 None if class == Class::Sfx => {
-                    let confirmed = pixels
+                    let glyphs = pixels
                         || text_boxes
                             .iter()
                             .any(|b| overlaps(cluster.bbox, *b, config));
-                    (Role::Sfx, None, confirmed)
+                    let accepted = cluster.masked_score.is_some() && glyphs;
+                    (Role::Sfx, None, accepted)
                 }
                 None => {
                     let accepted = cluster.detectors.len() >= 2 || pixels;
@@ -458,9 +470,21 @@ mod tests {
     }
 
     #[test]
-    fn sfx_needs_glyph_confirmation() {
+    fn sfx_needs_a_mask_and_glyph_confirmation() {
         let config = FusionConfig::default();
         let sfx = [300.0, 300.0, 460.0, 380.0];
+        let masked = || {
+            let mut c = candidate(sfx, Detector::Layout, Class::Sfx, 0.45);
+            c.has_mask = true;
+            c
+        };
+        let sfx_region = |fusion: Fusion| {
+            fusion
+                .regions
+                .into_iter()
+                .find(|r| r.role == Role::Sfx)
+                .expect("SFX region")
+        };
 
         let bare = fuse(
             &[candidate(sfx, Detector::Layout, Class::Sfx, 0.45)],
@@ -473,31 +497,49 @@ mod tests {
             "raw SFX rectangles are proposals"
         );
 
-        let by_mask = fuse(
-            &[candidate(sfx, Detector::Layout, Class::Sfx, 0.45)],
-            &config,
-            |_| 0.3,
+        // An instance mask with nothing to corroborate it is still one opinion.
+        assert!(!sfx_region(fuse(&[masked()], &config, no_mask)).accepted);
+        // Glyph evidence over a rectangle nobody segmented, likewise.
+        assert!(
+            !sfx_region(fuse(
+                &[candidate(sfx, Detector::Layout, Class::Sfx, 0.45)],
+                &config,
+                |_| 0.3
+            ))
+            .accepted
         );
-        assert!(by_mask.regions[0].accepted);
 
-        let by_text = fuse(
+        // Mask plus the pixel text mask.
+        assert!(sfx_region(fuse(&[masked()], &config, |_| 0.3)).accepted);
+
+        // Mask plus another detector's text box over the same rectangle.
+        for detector in [Detector::AnimeText, Detector::ComicTextDetector] {
+            let confirmed = sfx_region(fuse(
+                &[
+                    masked(),
+                    candidate([310.0, 310.0, 450.0, 370.0], detector, Class::Text, 0.5),
+                ],
+                &config,
+                no_mask,
+            ));
+            assert!(confirmed.accepted, "{detector:?} should confirm");
+        }
+
+        // …but the layout model cannot confirm its own SFX box by also calling
+        // it text.
+        let self_confirmed = sfx_region(fuse(
             &[
-                candidate(sfx, Detector::Layout, Class::Sfx, 0.45),
+                masked(),
                 candidate(
                     [310.0, 310.0, 450.0, 370.0],
-                    Detector::AnimeText,
+                    Detector::Layout,
                     Class::Text,
                     0.5,
                 ),
             ],
             &config,
             no_mask,
-        );
-        let confirmed = by_text
-            .regions
-            .iter()
-            .find(|r| r.role == Role::Sfx)
-            .expect("SFX region");
-        assert!(confirmed.accepted);
+        ));
+        assert!(!self_confirmed.accepted);
     }
 }
