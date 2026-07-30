@@ -8,6 +8,9 @@ use koharu_runtime::RuntimeManager;
 use rayon::prelude::*;
 
 mod models;
+#[cfg(feature = "onnx")]
+mod onnx;
+
 pub use models::ModelKind;
 
 pub(super) const FONT_COUNT: usize = 6_150;
@@ -34,10 +37,18 @@ koharu_runtime::declare_hf_model_package!(
 pub use crate::types::{FontPrediction, NamedFontPrediction, TextDirection, TopFont};
 
 pub struct FontDetector {
-    model: models::Model,
+    backend: Backend,
     labels: FontLabels,
-    device: Device,
-    dtype: DType,
+}
+
+enum Backend {
+    Candle {
+        model: models::Model,
+        device: Device,
+        dtype: DType,
+    },
+    #[cfg(feature = "onnx")]
+    Onnx(onnx::OnnxFontDetector),
 }
 
 impl FontDetector {
@@ -65,11 +76,65 @@ impl FontDetector {
         let labels = FontLabels::load(runtime).await?;
 
         Ok(Self {
-            model,
-            device,
-            dtype,
+            backend: Backend::Candle {
+                model,
+                device,
+                dtype,
+            },
             labels,
         })
+    }
+
+    /// Same checkpoint, run through ONNX Runtime on ogkalu's export instead of
+    /// the hand-ported candle backbone.
+    ///
+    /// Labels still come from the safetensors repo — the ONNX repo ships only
+    /// the graph.
+    #[cfg(feature = "onnx")]
+    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
+        Ok(Self {
+            backend: Backend::Onnx(onnx::OnnxFontDetector::load(runtime, cpu).await?),
+            labels: FontLabels::load(runtime).await?,
+        })
+    }
+
+    fn input_size(&self) -> usize {
+        match &self.backend {
+            Backend::Candle { model, .. } => model.input_size(),
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(_) => onnx::INPUT_SIZE,
+        }
+    }
+
+    /// One row per image: font logits, two direction logits, then the
+    /// regression block already squashed into [0, 1].
+    ///
+    /// The ONNX graph sigmoids the regression block itself, so the candle path
+    /// does the same here rather than leaving it to the decoder — one
+    /// convention, no per-backend branch downstream.
+    fn forward(&self, batch: &Tensor) -> Result<Vec<Vec<f32>>> {
+        match &self.backend {
+            Backend::Candle {
+                model,
+                device,
+                dtype,
+            } => {
+                let batch = batch.to_device(device)?.to_dtype(*dtype)?;
+                let mut rows = model
+                    .forward(&batch, false)?
+                    .to_dtype(DType::F32)?
+                    .to_device(&Device::Cpu)?
+                    .to_vec2::<f32>()?;
+                for row in &mut rows {
+                    for value in &mut row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM] {
+                        *value = sigmoid_scalar(*value);
+                    }
+                }
+                Ok(rows)
+            }
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => detector.forward(batch),
+        }
     }
 
     pub fn inference(&self, images: &[DynamicImage], top_k: usize) -> Result<Vec<FontPrediction>> {
@@ -78,7 +143,7 @@ impl FontDetector {
         }
 
         let started = Instant::now();
-        let input_size = self.model.input_size();
+        let input_size = self.input_size();
         let original_sizes = images
             .iter()
             .map(|image| image.dimensions().0)
@@ -90,22 +155,14 @@ impl FontDetector {
             .collect::<Vec<_>>()
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
-        let batch = Tensor::stack(&processed, 0)?
-            .to_device(&self.device)?
-            .to_dtype(self.dtype)?;
+        let batch = Tensor::stack(&processed, 0)?;
         let preprocess_elapsed = preprocess_started.elapsed();
 
         let forward_started = Instant::now();
-        let logits = self
-            .model
-            .forward(&batch, false)?
-            .to_dtype(DType::F32)?
-            .to_device(&Device::Cpu)?;
+        let rows = self.forward(&batch)?;
         let forward_elapsed = forward_started.elapsed();
 
         let postprocess_started = Instant::now();
-        let rows = logits.to_vec2::<f32>()?;
-
         let mut predictions = Vec::with_capacity(images.len());
         for (row, width) in rows.into_iter().zip(original_sizes) {
             let ranked: Vec<TopFont> = top_k_softmax(&row[..FONT_COUNT], top_k.min(FONT_COUNT))
@@ -134,10 +191,7 @@ impl FontDetector {
                 TextDirection::Horizontal
             };
 
-            let regression = row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM]
-                .iter()
-                .map(|&value| sigmoid_scalar(value))
-                .collect::<Vec<_>>();
+            let regression = &row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM];
             let clamp01 = |v: f32| v.clamp(0.0, 1.0);
             let text_color = [
                 (clamp01(regression[0]) * 255.0).round() as u8,

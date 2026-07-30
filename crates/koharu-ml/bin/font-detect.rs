@@ -24,6 +24,11 @@ struct Args {
     /// Backbone architecture (must match the converted checkpoint).
     #[arg(long, default_value = "resnet50", value_enum)]
     model: ModelKind,
+    /// Run ogkalu's ONNX export instead of the candle graph. Ignores --model:
+    /// the export is resnet50 only.
+    #[cfg(feature = "onnx")]
+    #[arg(long)]
+    onnx: bool,
 }
 
 #[tokio::main]
@@ -39,6 +44,13 @@ async fn main() -> Result<()> {
     )?;
     runtime.prepare().await?;
 
+    #[cfg(feature = "onnx")]
+    let detector = if args.onnx {
+        FontDetector::load_onnx(&runtime, args.cpu).await?
+    } else {
+        FontDetector::load_with_kind(&runtime, args.cpu, args.model).await?
+    };
+    #[cfg(not(feature = "onnx"))]
     let detector = FontDetector::load_with_kind(&runtime, args.cpu, args.model).await?;
     let image = image::open(&args.input)?;
     let start = std::time::Instant::now();
