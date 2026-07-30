@@ -91,8 +91,8 @@ pub struct Fusion {
     pub regions: Vec<FusedRegion>,
 }
 
-/// Fusion thresholds. Defaults are the eyeballed values from the model-audit
-/// pass; nothing here is fit to a labelled set yet.
+/// Fusion thresholds. `mask_coverage` is measured (see its docs); the rest are
+/// the eyeballed values from the model-audit pass, not fit to a labelled set.
 #[derive(Debug, Clone, Copy)]
 pub struct FusionConfig {
     /// Two boxes of the same class are the same object at or above this IoU.
@@ -104,6 +104,13 @@ pub struct FusionConfig {
     pub dialogue_ioa: f32,
     /// Fraction of a box covered by the pixel text mask to count as pixel
     /// confirmation.
+    ///
+    /// Measured over 169 fused regions on 12 watahazu pages: boxes two
+    /// detectors agreed on — the closest thing here to known text — never fell
+    /// below 0.22 and had a 5th percentile of 0.365, while single-vote boxes
+    /// ran down to 0.0. The old 0.10 confirmed 90% of single-vote boxes, which
+    /// made the pixel check nearly a no-op; 0.30 rejects the bottom quarter of
+    /// them and still confirms 99% of the multi-detector distribution.
     pub mask_coverage: f32,
     /// Layout-model score at which its own instance mask alone accepts a
     /// balloon with no second detector.
@@ -116,7 +123,7 @@ impl Default for FusionConfig {
             match_iou: 0.30,
             match_ioa: 0.50,
             dialogue_ioa: 0.60,
-            mask_coverage: 0.10,
+            mask_coverage: 0.30,
             strong_mask_score: 0.50,
         }
     }

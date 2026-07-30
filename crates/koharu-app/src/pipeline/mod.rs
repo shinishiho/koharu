@@ -366,7 +366,7 @@ mod tests {
         // fusion would change which votes exist.
         assert_eq!(catalog.detectors.len(), 1);
         assert!(catalog.detectors.iter().any(|engine| {
-            engine.id == "koharu-yolo26s"
+            engine.id == "koharu-fusion"
                 && engine.produces.iter().map(String::as_str).eq(["TextBoxes"])
         }));
     }
