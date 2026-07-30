@@ -152,6 +152,9 @@ async fn run() -> Result<()> {
     };
     let runtime = RuntimeManager::new_with_http(cfg.data.path.as_std_path(), compute, http)?;
     runtime
+        .downloads()
+        .set_hf_token(cfg.huggingface.token.as_ref().map(|t| t.expose()));
+    runtime
         .prepare()
         .await
         .context("prepare runtime (downloads llama.cpp if missing)")?;

@@ -13,6 +13,7 @@ const CONFIG_FILE: &str = "config.toml";
 const REDACTED: &str = "[REDACTED]";
 const SECRET_SERVICE: &str = "koharu";
 const PROVIDER_API_KEY_SECRET_PREFIX: &str = "llm_provider_api_key_";
+const HUGGINGFACE_TOKEN_SECRET: &str = "huggingface_token";
 
 // ---------------------------------------------------------------------------
 // RedactedSecret
@@ -63,6 +64,23 @@ pub struct AppConfig {
     pub http: HttpConfig,
     pub pipeline: PipelineConfig,
     pub providers: Vec<ProviderConfig>,
+    pub huggingface: HuggingFaceConfig,
+}
+
+/// HuggingFace access, for the gated model repositories.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(default)]
+pub struct HuggingFaceConfig {
+    /// Populated from credential storage on `load()`, never written to
+    /// config.toml. Serializes as `"[REDACTED]"` in API responses.
+    ///
+    /// Only some model repositories need this. `deepghs/AnimeText_yolo` is
+    /// `gated: auto`: the terms have to be accepted on the repo page and the
+    /// request has to be authenticated. When unset, koharu still honors
+    /// `HF_TOKEN` and the `hf auth login` file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub token: Option<RedactedSecret>,
 }
 
 /// Engine selection for each pipeline stage.
@@ -164,6 +182,20 @@ pub fn load() -> Result<AppConfig> {
         save(&config)?;
     }
 
+    // Secrets serialize as `"[REDACTED]"`, so that placeholder is what landed in
+    // config.toml. Drop it before consulting the keyring: if the keyring entry
+    // is gone, the placeholder would otherwise be used as a real credential.
+    let placeholder =
+        |secret: &Option<RedactedSecret>| secret.as_ref().is_some_and(|s| s.expose() == REDACTED);
+    for provider in &mut config.providers {
+        if placeholder(&provider.api_key) {
+            provider.api_key = None;
+        }
+    }
+    if placeholder(&config.huggingface.token) {
+        config.huggingface.token = None;
+    }
+
     // Populate api_key from credential storage for every known provider.
     let secrets = SecretStore::new(SECRET_SERVICE);
     for provider in &mut config.providers {
@@ -172,6 +204,11 @@ pub fn load() -> Result<AppConfig> {
         {
             provider.api_key = Some(RedactedSecret::new(key));
         }
+    }
+    if let Ok(Some(token)) = secrets.get(HUGGINGFACE_TOKEN_SECRET)
+        && !token.trim().is_empty()
+    {
+        config.huggingface.token = Some(RedactedSecret::new(token));
     }
 
     Ok(config)
@@ -183,7 +220,8 @@ pub fn save(config: &AppConfig) -> Result<()> {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create config dir `{parent}`"))?;
     }
-    // `api_key` is `#[serde(skip)]`, so it is never written to the TOML file.
+    // Secrets live in the keyring. They serialize as `"[REDACTED]"`, so that
+    // placeholder is all that reaches the TOML — and `load()` drops it again.
     let content = toml::to_string_pretty(config).context("failed to serialize config")?;
     fs::write(&path, content).with_context(|| format!("failed to write config to `{path}`"))
 }
@@ -256,6 +294,13 @@ pub fn apply_patch(config: &mut AppConfig, patch: koharu_core::ConfigPatch) {
             });
         }
         config.providers = new_providers;
+    }
+    if let Some(hf) = patch.huggingface {
+        config.huggingface.token = match hf.token.as_deref() {
+            Some(REDACTED) | None => config.huggingface.token.clone(),
+            Some("") => None,
+            Some(token) => Some(RedactedSecret::new(token)),
+        };
     }
 
     validate_pipeline_config(config);
@@ -375,6 +420,17 @@ pub fn sync_secrets(config: &AppConfig) -> Result<()> {
             _ => {} // "[REDACTED]" means unchanged
         }
     }
+    match &config.huggingface.token {
+        Some(token) if token.expose() != REDACTED => {
+            if token.expose().trim().is_empty() {
+                secrets.delete(HUGGINGFACE_TOKEN_SECRET)?;
+            } else {
+                secrets.set(HUGGINGFACE_TOKEN_SECRET, token.expose())?;
+            }
+        }
+        None => secrets.delete(HUGGINGFACE_TOKEN_SECRET)?,
+        _ => {}
+    }
     Ok(())
 }
 
@@ -447,6 +503,58 @@ mod tests {
         assert_eq!(config.pipeline.detector, PipelineConfig::default().detector);
         assert_eq!(config.pipeline.renderer, PipelineConfig::default().renderer);
         assert_eq!(config.pipeline.ocr, PipelineConfig::default().ocr);
+    }
+
+    #[test]
+    fn huggingface_token_patch_distinguishes_keep_clear_and_replace() {
+        let patch = |token: Option<&str>| ConfigPatch {
+            huggingface: Some(koharu_core::HuggingFaceConfigPatch {
+                token: token.map(str::to_string),
+            }),
+            ..Default::default()
+        };
+        let mut config = AppConfig::default();
+        config.huggingface.token = Some(RedactedSecret::new("stored-token"));
+
+        // Absent field and the redacted placeholder both mean "leave it alone" —
+        // the UI round-trips `GET /config`, which never returns the real value.
+        for keep in [None, Some(REDACTED)] {
+            let mut next = config.clone();
+            apply_patch(&mut next, patch(keep));
+            assert_eq!(
+                next.huggingface.token.as_ref().unwrap().expose(),
+                "stored-token"
+            );
+        }
+
+        let mut replaced = config.clone();
+        apply_patch(&mut replaced, patch(Some("new-token")));
+        assert_eq!(
+            replaced.huggingface.token.as_ref().unwrap().expose(),
+            "new-token"
+        );
+
+        let mut cleared = config.clone();
+        apply_patch(&mut cleared, patch(Some("")));
+        assert!(cleared.huggingface.token.is_none());
+
+        // A patch that says nothing about HuggingFace must not clear it either.
+        let mut untouched = config.clone();
+        apply_patch(&mut untouched, ConfigPatch::default());
+        assert_eq!(
+            untouched.huggingface.token.as_ref().unwrap().expose(),
+            "stored-token"
+        );
+    }
+
+    #[test]
+    fn token_never_reaches_config_toml_or_a_log_line() {
+        let mut config = AppConfig::default();
+        config.huggingface.token = Some(RedactedSecret::new("hf_secret_value"));
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(!serialized.contains("hf_secret_value"));
+        assert!(!format!("{config:?}").contains("hf_secret_value"));
     }
 
     #[test]

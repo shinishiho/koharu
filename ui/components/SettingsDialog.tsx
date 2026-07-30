@@ -114,6 +114,12 @@ function appConfigToPatch(cfg: AppConfig): ConfigPatch {
       apiKey: p.api_key ?? null,
     }))
   }
+  // Only sent when the dialog has something to say about it: '[REDACTED]' keeps
+  // the stored token, '' clears it, anything else replaces it. Omitting the key
+  // leaves it alone, so an unrelated save never touches the keyring.
+  if (cfg.huggingface?.token != null) {
+    patch.huggingface = { token: cfg.huggingface.token }
+  }
   return patch
 }
 
@@ -122,6 +128,10 @@ async function updateConfig(next: UpdateConfigBody): Promise<AppConfig> {
 }
 
 const GITHUB_REPO = 'mayocream/koharu'
+
+/// What the API sends in place of a stored secret, and what it accepts back to
+/// mean "leave the stored one alone".
+const REDACTED = '[REDACTED]'
 
 const TABS = [
   { id: 'appearance', icon: PaletteIcon, labelKey: 'settings.appearance' },
@@ -159,6 +169,7 @@ export function SettingsDialog({
   const [appConfig, setAppConfig] = useState<UpdateConfigBody | null>(null)
   const [providerCatalogs, setProviderCatalogs] = useState<LlmProviderCatalog[]>([])
   const [apiKeyDrafts, setApiKeyDrafts] = useState<Record<string, string>>({})
+  const [hfTokenDraft, setHfTokenDraft] = useState('')
   const [dataPathDraft, setDataPathDraft] = useState('')
   const [httpConnectTimeoutDraft, setHttpConnectTimeoutDraft] = useState('')
   const [httpReadTimeoutDraft, setHttpReadTimeoutDraft] = useState('')
@@ -384,6 +395,23 @@ export function SettingsDialog({
                       }),
                     )
                   }}
+                  hfToken={appConfig?.huggingface?.token ?? null}
+                  hfTokenDraft={hfTokenDraft}
+                  onHfTokenChange={setHfTokenDraft}
+                  onSaveHfToken={() => {
+                    const token = hfTokenDraft.trim()
+                    if (!token || !appConfig) return
+                    void persistConfig({ ...appConfig, huggingface: { token } }).then(() =>
+                      setHfTokenDraft(''),
+                    )
+                  }}
+                  onClearHfToken={() => {
+                    if (!appConfig) return
+                    // Empty string, not null: null means "leave it alone".
+                    void persistConfig({ ...appConfig, huggingface: { token: '' } }).then(() =>
+                      setHfTokenDraft(''),
+                    )
+                  }}
                 />
               )}
               {tab === 'runtime' && (
@@ -570,6 +598,11 @@ function ProvidersPane({
   onApiKeyChange,
   onSaveKey,
   onClearKey,
+  hfToken,
+  hfTokenDraft,
+  onHfTokenChange,
+  onSaveHfToken,
+  onClearHfToken,
 }: {
   catalogs: LlmProviderCatalog[]
   config: UpdateConfigBody | null
@@ -579,18 +612,63 @@ function ProvidersPane({
   onApiKeyChange: (id: string, v: string) => void
   onSaveKey: (id: string) => void
   onClearKey: (id: string) => void
+  hfToken: string | null
+  hfTokenDraft: string
+  onHfTokenChange: (v: string) => void
+  onSaveHfToken: () => void
+  onClearHfToken: () => void
 }) {
   const { t } = useTranslation()
+  const hfStored = hfToken === REDACTED
+  const hfHasDraft = hfTokenDraft.trim().length > 0
+
+  const huggingFaceSection = (
+    <Section title={t('settings.huggingFace')} description={t('settings.huggingFaceDescription')}>
+      <div className='space-y-1.5'>
+        <Label className='text-xs'>{t('settings.huggingFaceToken')}</Label>
+        <div className='flex gap-2'>
+          <Input
+            type='password'
+            value={hfTokenDraft}
+            onChange={(e) => onHfTokenChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && hfHasDraft) onSaveHfToken()
+            }}
+            placeholder={
+              hfStored
+                ? t('settings.apiKeyPlaceholderStored')
+                : t('settings.huggingFaceTokenPlaceholder')
+            }
+            className='[&::-ms-reveal]:hidden'
+          />
+          {hfHasDraft ? (
+            <Button size='sm' onClick={onSaveHfToken}>
+              {t('settings.apiKeySave')}
+            </Button>
+          ) : hfStored ? (
+            <Button variant='destructive' size='sm' onClick={onClearHfToken}>
+              {t('settings.apiKeyClear')}
+            </Button>
+          ) : null}
+        </div>
+        <p className='text-xs text-muted-foreground'>{t('settings.huggingFaceTokenHint')}</p>
+      </div>
+    </Section>
+  )
 
   if (!catalogs.length)
     return (
-      <p className='py-12 text-center text-sm text-muted-foreground'>
-        {t('settings.loadingProviders')}
-      </p>
+      <div className='space-y-6'>
+        {huggingFaceSection}
+        <p className='py-12 text-center text-sm text-muted-foreground'>
+          {t('settings.loadingProviders')}
+        </p>
+      </div>
     )
 
   return (
     <div className='space-y-6'>
+      {huggingFaceSection}
       <Section title={t('settings.apiKeys')} description={t('settings.providersDescription')}>
         <Accordion type='multiple' className='-mx-1'>
           {catalogs.map((provider) => {
@@ -643,7 +721,7 @@ function ProvidersPane({
                           if (e.key === 'Enter' && hasDraft) onSaveKey(provider.id)
                         }}
                         placeholder={
-                          cfg?.api_key === '[REDACTED]'
+                          cfg?.api_key === REDACTED
                             ? t('settings.apiKeyPlaceholderStored')
                             : t('settings.apiKeyPlaceholderEmpty')
                         }
@@ -653,7 +731,7 @@ function ProvidersPane({
                         <Button size='sm' onClick={() => onSaveKey(provider.id)}>
                           {t('settings.apiKeySave')}
                         </Button>
-                      ) : cfg?.api_key === '[REDACTED]' ? (
+                      ) : cfg?.api_key === REDACTED ? (
                         <Button
                           variant='destructive'
                           size='sm'

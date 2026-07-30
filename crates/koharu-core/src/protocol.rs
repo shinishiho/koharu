@@ -204,6 +204,15 @@ pub struct ConfigPatch {
     /// are interpreted as "leave the existing secret alone".
     #[serde(default)]
     pub providers: Option<Vec<ProviderPatch>>,
+    #[serde(default)]
+    pub huggingface: Option<HuggingFaceConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HuggingFaceConfigPatch {
+    /// `"[REDACTED]"` → keep existing keyring secret; empty → clear; otherwise save.
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, ToSchema)]

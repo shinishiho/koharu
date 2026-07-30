@@ -940,6 +940,14 @@
               "read_timeout": 300
             }
           },
+          "huggingface": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HuggingFaceConfig"
+              }
+            ],
+            "default": {}
+          },
           "pipeline": {
             "oneOf": [
               {
@@ -1154,6 +1162,16 @@
               },
               {
                 "$ref": "#/components/schemas/HttpConfigPatch"
+              }
+            ]
+          },
+          "huggingface": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HuggingFaceConfigPatch"
               }
             ]
           },
@@ -1598,6 +1616,26 @@
             "type": ["integer", "null"],
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "HuggingFaceConfig": {
+        "type": "object",
+        "description": "HuggingFace access, for the gated model repositories.",
+        "properties": {
+          "token": {
+            "type": ["string", "null"],
+            "description": "Populated from credential storage on `load()`, never written to\nconfig.toml. Serializes as `\"[REDACTED]\"` in API responses.\n\nOnly some model repositories need this. `deepghs/AnimeText_yolo` is\n`gated: auto`: the terms have to be accepted on the repo page and the\nrequest has to be authenticated. When unset, koharu still honors\n`HF_TOKEN` and the `hf auth login` file.",
+            "default": null
+          }
+        }
+      },
+      "HuggingFaceConfigPatch": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": ["string", "null"],
+            "description": "`\"[REDACTED]\"` → keep existing keyring secret; empty → clear; otherwise save."
           }
         }
       },

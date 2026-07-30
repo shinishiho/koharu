@@ -73,18 +73,23 @@ pub async fn run() -> Result<()> {
         ComputePolicy::PreferGpu
     };
 
+    // The gated model repos need an authenticated request, and the token lives
+    // in the keyring rather than in config.toml, so it has to be handed to the
+    // downloader explicitly.
+    let hf_token = config.huggingface.token.as_ref().map(|t| t.expose());
+
     if cli.download {
-        return RuntimeManager::new_with_http(config.data.path.as_std_path(), compute, http)?
+        let runtime = RuntimeManager::new_with_http(config.data.path.as_std_path(), compute, http)?;
+        runtime.downloads().set_hf_token(hf_token);
+        return runtime
             .prepare()
             .await
             .context("failed to download runtime packages");
     }
 
-    let state = BootstrapManager::new(Arc::new(RuntimeManager::new_with_http(
-        config.data.path.as_std_path(),
-        compute,
-        http,
-    )?));
+    let runtime = RuntimeManager::new_with_http(config.data.path.as_std_path(), compute, http)?;
+    runtime.downloads().set_hf_token(hf_token);
+    let state = BootstrapManager::new(Arc::new(runtime));
     state.spawn_download_forwarder();
 
     #[cfg(target_os = "windows")]

@@ -34,7 +34,14 @@ const HF_METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Downloads {
     downloads_root: PathBuf,
     huggingface_cache: Cache,
-    hf_token: Option<String>,
+    /// What the machine already had: `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`,
+    /// koharu's cache, the `hf auth login` file. Resolved once at startup.
+    hf_token_discovered: Option<String>,
+    /// What the user configured in koharu itself, which wins over discovery —
+    /// they typed it into this app, so this app should use it. Shared across
+    /// clones (`downloads()` hands out a clone) and settable at runtime, so
+    /// pasting a token in settings works without a restart.
+    hf_token_override: Arc<std::sync::RwLock<Option<String>>>,
     client: RuntimeHttpClient,
     tx: broadcast::Sender<DownloadProgress>,
     progress: Arc<MultiProgress>,
@@ -51,7 +58,8 @@ impl Downloads {
 
         Ok(Self {
             downloads_root,
-            hf_token: hf_token(&huggingface_cache),
+            hf_token_discovered: hf_token(&huggingface_cache),
+            hf_token_override: Arc::new(std::sync::RwLock::new(None)),
             huggingface_cache,
             client,
             tx: broadcast::channel(256).0,
@@ -59,9 +67,32 @@ impl Downloads {
         })
     }
 
-    /// Whether a HuggingFace access token was found. Gated repos need one.
+    /// Whether a HuggingFace access token is available. Gated repos need one.
     pub fn has_hf_token(&self) -> bool {
-        self.hf_token.is_some()
+        self.hf_token().is_some()
+    }
+
+    /// Set (or clear, with `None`) koharu's own configured token. Clearing falls
+    /// back to whatever was discovered on the machine rather than to nothing.
+    pub fn set_hf_token(&self, token: Option<&str>) {
+        let token = token
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        // Never log the value itself.
+        tracing::debug!(configured = token.is_some(), "HuggingFace token updated");
+        match self.hf_token_override.write() {
+            Ok(mut slot) => *slot = token,
+            Err(_) => tracing::error!("HuggingFace token lock poisoned, token not updated"),
+        }
+    }
+
+    fn hf_token(&self) -> Option<String> {
+        self.hf_token_override
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .or_else(|| self.hf_token_discovered.clone())
     }
 
     pub fn client(&self) -> RuntimeHttpClient {
@@ -90,8 +121,9 @@ impl Downloads {
             .with_progress(false)
             .with_user_agent("koharu", env!("CARGO_PKG_VERSION"))
             // `from_cache` only reads a token file next to our own cache dir;
-            // `hf_token` also honors the env vars and the `hf auth login` file.
-            .with_token(self.hf_token.clone())
+            // `hf_token` also honors koharu's setting, the env vars and the
+            // `hf auth login` file.
+            .with_token(self.hf_token())
             .build()
             .context("failed to build HF Hub API")?;
         let repo_handle = api.model(repo.to_string());
@@ -283,7 +315,7 @@ impl Downloads {
         request: reqwest_middleware::RequestBuilder,
         url: &str,
     ) -> reqwest_middleware::RequestBuilder {
-        match &self.hf_token {
+        match self.hf_token() {
             Some(token) if is_huggingface_url(url) => {
                 request.header(AUTHORIZATION, format!("Bearer {token}"))
             }
@@ -309,8 +341,8 @@ impl Downloads {
         };
         error.context(format!(
             "`{repo}` is a gated repository and {token_state}. \
-             Accept the terms at https://huggingface.co/{repo}, then set HF_TOKEN \
-             (or run `hf auth login`)"
+             Accept the terms at https://huggingface.co/{repo}, then add a token \
+             in Settings under API keys (or set HF_TOKEN, or run `hf auth login`)"
         ))
     }
 
@@ -463,9 +495,56 @@ fn part_path(destination: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::{is_huggingface_url, part_path};
+    use super::{Downloads, is_huggingface_url, part_path};
+    use crate::runtime::RuntimeHttpConfig;
+
+    /// A `Downloads` with a known discovered token, standing in for one found in
+    /// the environment or a login file.
+    fn with_discovered_token(discovered: Option<&str>) -> Downloads {
+        let mut downloads = Downloads::new(
+            PathBuf::from("/tmp/koharu-test-downloads"),
+            PathBuf::from("/tmp/koharu-test-hf"),
+            &RuntimeHttpConfig::default(),
+        )
+        .expect("build downloads");
+        downloads.hf_token_discovered = discovered.map(str::to_string);
+        downloads
+    }
+
+    #[test]
+    fn configured_token_wins_and_clearing_falls_back_to_discovery() {
+        let downloads = with_discovered_token(Some("from-the-environment"));
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        downloads.set_hf_token(Some("from-settings"));
+        assert_eq!(downloads.hf_token().as_deref(), Some("from-settings"));
+
+        // Clearing koharu's own setting must not hide a token the machine
+        // already had.
+        downloads.set_hf_token(None);
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        // Whitespace is not a token.
+        downloads.set_hf_token(Some("   "));
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        let bare = with_discovered_token(None);
+        assert!(!bare.has_hf_token());
+        bare.set_hf_token(Some(" padded "));
+        assert_eq!(bare.hf_token().as_deref(), Some("padded"));
+        assert!(bare.has_hf_token());
+    }
 
     #[test]
     fn partial_download_path_appends_suffix() {
