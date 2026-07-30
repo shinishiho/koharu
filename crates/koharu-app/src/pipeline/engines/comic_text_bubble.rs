@@ -79,6 +79,49 @@ impl Engine for Model {
 }
 
 // 3. Spawning the isolated OS Thread during Engine Load
+fn spawn_detector(
+    runtime: koharu_runtime::RuntimeManager,
+    cpu: bool,
+    onnx: bool,
+) -> mpsc::Sender<DetectMessage> {
+    let (tx, mut rx) = mpsc::channel::<DetectMessage>(8);
+
+    thread::spawn(move || {
+        // Initialize an isolated single-threaded runtime strictly for this OS thread
+        let rt = Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async move {
+            #[cfg(feature = "onnx")]
+            let loaded = if onnx {
+                ComicTextBubbleDetector::load_onnx(&runtime, cpu).await
+            } else {
+                ComicTextBubbleDetector::load(&runtime, cpu).await
+            };
+            #[cfg(not(feature = "onnx"))]
+            let loaded = {
+                let _ = onnx;
+                ComicTextBubbleDetector::load(&runtime, cpu).await
+            };
+
+            // The CUDA context is now permanently tied to this specific thread
+            let detector = match loaded {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::error!("Failed to load detector: {:?}", e);
+                    return;
+                }
+            };
+
+            // Listen continuously for pipeline requests
+            while let Some(msg) = rx.recv().await {
+                let result = detector.inference(&msg.image);
+                let _ = msg.respond_to.send(result);
+            }
+        });
+    });
+
+    tx
+}
+
 inventory::submit! {
     EngineInfo {
         id: "comic-text-bubble-detector",
@@ -86,32 +129,22 @@ inventory::submit! {
         needs: &[],
         produces: &[Artifact::TextBoxes],
         load: |runtime, cpu| Box::pin(async move {
-            let (tx, mut rx) = mpsc::channel::<DetectMessage>(8);
-            let runtime_clone = runtime.clone(); // Clone Arc for the thread
+            let sender = spawn_detector(runtime.clone(), cpu, false);
+            Ok(Box::new(Model { sender }) as Box<dyn Engine>)
+        }),
+    }
+}
 
-            thread::spawn(move || {
-                // Initialize an isolated single-threaded runtime strictly for this OS thread
-                let rt = Builder::new_current_thread().enable_all().build().unwrap();
-                rt.block_on(async move {
-
-                    // The CUDA context is now permanently tied to this specific thread
-                    let detector = match ComicTextBubbleDetector::load(&runtime_clone, cpu).await {
-                        Ok(d) => d,
-                        Err(e) => {
-                            tracing::error!("Failed to load detector: {:?}", e);
-                            return;
-                        }
-                    };
-
-                    // Listen continuously for pipeline requests
-                    while let Some(msg) = rx.recv().await {
-                        let result = detector.inference(&msg.image);
-                        let _ = msg.respond_to.send(result);
-                    }
-                });
-            });
-
-            Ok(Box::new(Model { sender: tx }) as Box<dyn Engine>)
+#[cfg(feature = "onnx")]
+inventory::submit! {
+    EngineInfo {
+        id: "comic-text-bubble-detector-onnx",
+        name: "Comic Text & Bubble Detector (ONNX)",
+        needs: &[],
+        produces: &[Artifact::TextBoxes],
+        load: |runtime, cpu| Box::pin(async move {
+            let sender = spawn_detector(runtime.clone(), cpu, true);
+            Ok(Box::new(Model { sender }) as Box<dyn Engine>)
         }),
     }
 }

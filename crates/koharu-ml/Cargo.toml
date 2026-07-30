@@ -29,6 +29,7 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 rustfft = { workspace = true }
 rayon = { workspace = true }
+ort = { workspace = true, optional = true }
 cudarc = { workspace = true, optional = true }
 objc2 = { workspace = true, optional = true }
 objc2-metal = { workspace = true, optional = true }
@@ -36,8 +37,14 @@ objc2-metal-performance-shaders = { workspace = true, optional = true }
 objc2-metal-performance-shaders-graph = { workspace = true, optional = true }
 objc2-foundation = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# CoreML execution provider, so the ONNX path has a GPU/ANE option on macOS.
+ort = { workspace = true, optional = true, features = ["coreml"] }
+
 [features]
+onnx = ["ort"]
 cuda = [
+    "ort?/cuda",
     "candle-core/cuda",
     "candle-core/cudnn",
     "candle-nn/cuda",

@@ -1,4 +1,6 @@
 mod model;
+#[cfg(feature = "onnx")]
+mod onnx;
 
 use std::{collections::BTreeMap, time::Instant};
 
@@ -39,34 +41,32 @@ koharu_runtime::declare_hf_model_package!(
     order: 115,
 );
 
-#[derive(Debug)]
 pub struct ComicTextBubbleDetector {
-    model: RTDetrV2ForObjectDetection,
+    backend: Backend,
     config: RTDetrV2Config,
     preprocessor: RTDetrImageProcessorConfig,
-    device: Device,
-    dtype: DType,
     slicer: ImageSlicer,
+}
+
+enum Backend {
+    Candle {
+        model: RTDetrV2ForObjectDetection,
+        device: Device,
+        dtype: DType,
+    },
+    #[cfg(feature = "onnx")]
+    Onnx(onnx::OnnxDetector),
 }
 
 impl ComicTextBubbleDetector {
     pub async fn load(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
+        let (config, preprocessor) = Self::load_configs(runtime).await?;
         let device = device(cpu)?;
         let dtype = loading::model_dtype(&device);
-        let downloads = runtime.downloads();
-        let config_path = downloads.huggingface_model(HF_REPO, "config.json").await?;
-        let preprocessor_path = downloads
-            .huggingface_model(HF_REPO, "preprocessor_config.json")
-            .await?;
-        let weights_path = downloads
+        let weights_path = runtime
+            .downloads()
             .huggingface_model(HF_REPO, "model.safetensors")
             .await?;
-
-        let config = loading::read_json::<RTDetrV2Config>(&config_path)
-            .with_context(|| format!("failed to parse {}", config_path.display()))?;
-        config.validate()?;
-        let preprocessor = loading::read_json::<RTDetrImageProcessorConfig>(&preprocessor_path)
-            .with_context(|| format!("failed to parse {}", preprocessor_path.display()))?;
         let model = loading::load_mmaped_safetensors_path_with_dtype(
             &weights_path,
             &device,
@@ -75,13 +75,45 @@ impl ComicTextBubbleDetector {
         )?;
 
         Ok(Self {
-            model,
+            backend: Backend::Candle {
+                model,
+                device,
+                dtype,
+            },
             config,
             preprocessor,
-            device,
-            dtype,
             slicer: ImageSlicer::default(),
         })
+    }
+
+    /// Same detector, run through ONNX Runtime on the upstream `detector.onnx`
+    /// deploy export instead of the hand-ported candle graph.
+    #[cfg(feature = "onnx")]
+    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
+        let (config, preprocessor) = Self::load_configs(runtime).await?;
+        Ok(Self {
+            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, cpu).await?),
+            config,
+            preprocessor,
+            slicer: ImageSlicer::default(),
+        })
+    }
+
+    async fn load_configs(
+        runtime: &RuntimeManager,
+    ) -> Result<(RTDetrV2Config, RTDetrImageProcessorConfig)> {
+        let downloads = runtime.downloads();
+        let config_path = downloads.huggingface_model(HF_REPO, "config.json").await?;
+        let preprocessor_path = downloads
+            .huggingface_model(HF_REPO, "preprocessor_config.json")
+            .await?;
+
+        let config = loading::read_json::<RTDetrV2Config>(&config_path)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?;
+        config.validate()?;
+        let preprocessor = loading::read_json::<RTDetrImageProcessorConfig>(&preprocessor_path)
+            .with_context(|| format!("failed to parse {}", preprocessor_path.display()))?;
+        Ok((config, preprocessor))
     }
 
     #[instrument(level = "debug", skip_all)]
@@ -128,26 +160,43 @@ impl ComicTextBubbleDetector {
         image: &DynamicImage,
         threshold: f32,
     ) -> Result<Vec<ComicTextBubbleRegion>> {
-        let pixel_values = preprocess_image(image, &self.preprocessor, &self.device, self.dtype)?;
+        match &self.backend {
+            Backend::Candle {
+                model,
+                device,
+                dtype,
+            } => {
+                let pixel_values = preprocess_image(image, &self.preprocessor, device, *dtype)?;
 
-        // Wrap the forward pass and post-processing in a closure so we can capture
-        // any errors without returning from the outer function immediately.
-        let inference_result = (|| -> Result<Vec<ComicTextBubbleRegion>> {
-            let outputs = self.model.forward(&pixel_values)?;
-            post_process_object_detection(&self.config, &outputs, image.dimensions(), threshold)
-        })();
+                // Wrap the forward pass and post-processing in a closure so we can capture
+                // any errors without returning from the outer function immediately.
+                let inference_result = (|| -> Result<Vec<ComicTextBubbleRegion>> {
+                    let outputs = model.forward(&pixel_values)?;
+                    post_process_object_detection(
+                        &self.config,
+                        &outputs,
+                        image.dimensions(),
+                        threshold,
+                    )
+                })();
 
-        // EXPLICIT VRAM CLEANUP
-        // This is now guaranteed to run even if the forward pass fails and returns an Err
-        drop(pixel_values);
+                // EXPLICIT VRAM CLEANUP
+                // This is now guaranteed to run even if the forward pass fails and returns an Err
+                drop(pixel_values);
 
-        // Force the CUDA device to flush its command queue and release memory
-        // back to the OS so Vulkan (llama.cpp) can safely use it.
-        if self.device.is_cuda() {
-            let _ = self.device.synchronize();
+                // Force the CUDA device to flush its command queue and release memory
+                // back to the OS so Vulkan (llama.cpp) can safely use it.
+                if device.is_cuda() {
+                    let _ = device.synchronize();
+                }
+
+                inference_result
+            }
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => {
+                detector.detect(image, threshold, &self.config, &self.preprocessor)
+            }
         }
-
-        inference_result
     }
 }
 
