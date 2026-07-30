@@ -23,7 +23,9 @@ pub const HF_REPO: &str = "mayocream/anime-text-yolo";
 const INPUT_SIZE: u32 = 640;
 const NUM_CLASSES: usize = 1;
 const DEFAULT_VARIANT: AnimeTextYoloVariant = AnimeTextYoloVariant::N;
-const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.25;
+/// Fallback only. The ONNX export ships its own per-variant threshold; see
+/// [`AnimeTextDetector::recommended_confidence`].
+pub const DEFAULT_CONFIDENCE_THRESHOLD: f32 = 0.25;
 const DEFAULT_NMS_THRESHOLD: f32 = 0.45;
 const LETTERBOX_COLOR: u8 = 114;
 const DETECTOR_NAME: &str = "anime-text-yolo";
@@ -226,9 +228,29 @@ impl AnimeTextDetector {
         self.variant
     }
 
+    /// The confidence threshold upstream measured as F1-optimal for these
+    /// weights, when the backend ships one.
+    ///
+    /// Only the ONNX path has it: deepghs pins it next to each export, while
+    /// the safetensors repo the candle path uses carries no such file. Both
+    /// backends run the same weights, so a candle user who wants the tuned
+    /// number can pass it explicitly.
+    pub fn recommended_confidence(&self) -> Option<f32> {
+        match &self.backend {
+            Backend::Candle { .. } => None,
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => detector.recommended_confidence(),
+        }
+    }
+
     #[instrument(level = "debug", skip_all)]
     pub fn inference(&self, image: &DynamicImage) -> Result<AnimeTextDetection> {
-        self.inference_with_thresholds(image, DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_NMS_THRESHOLD)
+        self.inference_with_thresholds(
+            image,
+            self.recommended_confidence()
+                .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD),
+            DEFAULT_NMS_THRESHOLD,
+        )
     }
 
     #[instrument(level = "debug", skip_all)]

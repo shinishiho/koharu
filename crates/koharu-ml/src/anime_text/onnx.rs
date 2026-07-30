@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use candle_core::{Device, Tensor};
 use koharu_runtime::RuntimeManager;
 use ort::value::Tensor as OrtTensor;
+use serde::Deserialize;
 
 use super::{AnimeTextYoloVariant, INPUT_SIZE, Letterboxed};
 use crate::onnx::{OnnxSession, blank_image_input, ort_err};
@@ -61,9 +62,16 @@ koharu_runtime::declare_hf_model_package!(
     order: 129,
 );
 
+/// deepghs' F1-optimal confidence, pinned per export next to the weights.
+#[derive(Deserialize)]
+struct ThresholdFile {
+    threshold: f32,
+}
+
 #[derive(Debug)]
 pub(super) struct OnnxDetector {
     session: OnnxSession,
+    recommended_confidence: Option<f32>,
 }
 
 impl OnnxDetector {
@@ -72,12 +80,14 @@ impl OnnxDetector {
         variant: AnimeTextYoloVariant,
         cpu: bool,
     ) -> Result<Self> {
-        let filename = onnx_filename(variant);
+        let directory = variant_directory(variant);
         let path = runtime
             .downloads()
-            .huggingface_model(HF_REPO, &filename)
+            .huggingface_model(HF_REPO, &format!("{directory}/model.onnx"))
             .await?;
-        Self::load_from_path(&path, cpu)
+        let mut detector = Self::load_from_path(&path, cpu)?;
+        detector.recommended_confidence = read_threshold(runtime, &directory).await;
+        Ok(detector)
     }
 
     pub(super) fn load_from_path(path: &Path, cpu: bool) -> Result<Self> {
@@ -89,7 +99,14 @@ impl OnnxDetector {
             Ok(())
         })?;
 
-        Ok(Self { session })
+        Ok(Self {
+            session,
+            recommended_confidence: None,
+        })
+    }
+
+    pub(super) fn recommended_confidence(&self) -> Option<f32> {
+        self.recommended_confidence
     }
 
     /// One forward pass, returning the `(4 + classes, anchors)` prediction
@@ -125,8 +142,45 @@ impl OnnxDetector {
     }
 }
 
-fn onnx_filename(variant: AnimeTextYoloVariant) -> String {
-    format!("yolo12{}_animetext/model.onnx", variant.as_str())
+fn variant_directory(variant: AnimeTextYoloVariant) -> String {
+    format!("yolo12{}_animetext", variant.as_str())
+}
+
+/// Read the export's recommended confidence threshold.
+///
+/// Each variant peaks at a different confidence (0.251 for n, 0.425 for x), so
+/// one hardcoded default is wrong for four of the five. Reading upstream's own
+/// number also means a retrain can't silently desync koharu's default.
+///
+/// Not fatal when it fails: the model itself already downloaded, so access is
+/// proven and a failure here means the file is gone or malformed. The caller
+/// falls back to [`super::DEFAULT_CONFIDENCE_THRESHOLD`].
+async fn read_threshold(runtime: &RuntimeManager, directory: &str) -> Option<f32> {
+    let filename = format!("{directory}/threshold.json");
+    let read = async {
+        let path = runtime
+            .downloads()
+            .huggingface_model(HF_REPO, &filename)
+            .await?;
+        let bytes = std::fs::read(&path)
+            .with_context(|| format!("failed to read `{}`", path.display()))?;
+        Ok::<f32, anyhow::Error>(serde_json::from_slice::<ThresholdFile>(&bytes)?.threshold)
+    };
+
+    match read.await {
+        Ok(threshold) if (0.0..1.0).contains(&threshold) => {
+            tracing::debug!(threshold, %filename, "using upstream confidence threshold");
+            Some(threshold)
+        }
+        Ok(threshold) => {
+            tracing::warn!(threshold, %filename, "confidence threshold out of range, ignoring");
+            None
+        }
+        Err(error) => {
+            tracing::warn!(%filename, error = %format!("{error:#}"), "no upstream confidence threshold, using koharu's default");
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -134,14 +188,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn onnx_filename_matches_the_repo_layout() {
-        assert_eq!(
-            onnx_filename(AnimeTextYoloVariant::X),
-            "yolo12x_animetext/model.onnx"
-        );
-        assert_eq!(
-            onnx_filename(AnimeTextYoloVariant::N),
-            "yolo12n_animetext/model.onnx"
-        );
+    fn variant_directory_matches_the_repo_layout() {
+        assert_eq!(variant_directory(AnimeTextYoloVariant::X), "yolo12x_animetext");
+        assert_eq!(variant_directory(AnimeTextYoloVariant::N), "yolo12n_animetext");
+    }
+
+    #[test]
+    fn threshold_file_parses_upstream_shape() {
+        let parsed: ThresholdFile = serde_json::from_str(r#"{"threshold": 0.425}"#).unwrap();
+        assert!((parsed.threshold - 0.425).abs() < 1e-6);
     }
 }
