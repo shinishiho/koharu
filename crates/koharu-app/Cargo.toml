@@ -19,7 +19,8 @@ path = "bin/pipeline.rs"
 clap = { workspace = true }
 tracing-subscriber = { workspace = true }
 koharu-core = { workspace = true }
-koharu-ml = { workspace = true }
+# Not optional: every detection engine here runs on ONNX Runtime.
+koharu-ml = { workspace = true, features = ["onnx"] }
 koharu-renderer = { workspace = true }
 koharu-llm = { workspace = true }
 koharu-runtime = { workspace = true }
@@ -56,5 +57,5 @@ zip = { workspace = true }
 [features]
 cuda = ["koharu-ml/cuda"]
 metal = ["koharu-ml/metal"]
-onnx = ["koharu-ml/onnx"]
-onnx-cuda = ["onnx", "koharu-ml/onnx-cuda"]
+# ONNX Runtime is always on; this only adds its CUDA execution provider.
+onnx-cuda = ["koharu-ml/onnx-cuda"]

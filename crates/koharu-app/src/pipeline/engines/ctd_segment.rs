@@ -46,7 +46,9 @@ inventory::submit! {
         needs: &[Artifact::TextBoxes],
         produces: &[Artifact::SegmentMask],
         load: |runtime, cpu| Box::pin(async move {
-            let m = ComicTextDetector::load_segmentation_only(runtime, cpu).await?;
+            // One graph, so there is no segmentation-only variant to load — the
+            // mask comes out of the same pass as the boxes.
+            let m = ComicTextDetector::load_onnx(runtime, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

@@ -1,5 +1,5 @@
-//! Comic Text Detector (full): text-box detector + UNet-based segmentation
-//! mask. Emits `AddNode` ops for each detected text region plus an
+//! Comic Text Detector (full), on ONNX Runtime: text-box detector + UNet-based
+//! segmentation mask. Emits `AddNode` ops for each detected text region plus an
 //! `AddNode` / `UpdateNode` for the `Mask { Segment }` layer.
 
 use anyhow::Result;
@@ -69,7 +69,7 @@ inventory::submit! {
         needs: &[],
         produces: &[Artifact::TextBoxes, Artifact::SegmentMask],
         load: |runtime, cpu| Box::pin(async move {
-            let m = ComicTextDetector::load(runtime, cpu).await?;
+            let m = ComicTextDetector::load_onnx(runtime, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

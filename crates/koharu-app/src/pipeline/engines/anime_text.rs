@@ -1,9 +1,10 @@
-//! Anime Text YOLO detector. Emits `AddNode` ops for each detected text region.
+//! Anime Text YOLO detector, on ONNX Runtime. Emits `AddNode` ops for each
+//! detected text region.
 
 use anyhow::Result;
 use async_trait::async_trait;
 use koharu_core::{Op, TextData};
-use koharu_ml::anime_text::AnimeTextDetector;
+use koharu_ml::anime_text::{AnimeTextDetector, AnimeTextYoloVariant};
 
 use crate::pipeline::artifacts::Artifact;
 use crate::pipeline::engine::{Engine, EngineCtx, EngineInfo};
@@ -52,7 +53,10 @@ inventory::submit! {
         needs: &[],
         produces: &[Artifact::TextBoxes],
         load: |runtime, cpu| Box::pin(async move {
-            let m = AnimeTextDetector::load(runtime, cpu).await?;
+            // `deepghs/AnimeText_yolo` is gated: this load fails with an
+            // actionable 401 until the user accepts the terms and adds a
+            // HuggingFace token in settings.
+            let m = AnimeTextDetector::load_onnx(runtime, AnimeTextYoloVariant::N, cpu).await?;
             Ok(Box::new(Model(m)) as Box<dyn Engine>)
         }),
     }

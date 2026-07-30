@@ -82,7 +82,6 @@ impl Engine for Model {
 fn spawn_detector(
     runtime: koharu_runtime::RuntimeManager,
     cpu: bool,
-    onnx: bool,
 ) -> mpsc::Sender<DetectMessage> {
     let (tx, mut rx) = mpsc::channel::<DetectMessage>(8);
 
@@ -90,17 +89,7 @@ fn spawn_detector(
         // Initialize an isolated single-threaded runtime strictly for this OS thread
         let rt = Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async move {
-            #[cfg(feature = "onnx")]
-            let loaded = if onnx {
-                ComicTextBubbleDetector::load_onnx(&runtime, cpu).await
-            } else {
-                ComicTextBubbleDetector::load(&runtime, cpu).await
-            };
-            #[cfg(not(feature = "onnx"))]
-            let loaded = {
-                let _ = onnx;
-                ComicTextBubbleDetector::load(&runtime, cpu).await
-            };
+            let loaded = ComicTextBubbleDetector::load_onnx(&runtime, cpu).await;
 
             // The CUDA context is now permanently tied to this specific thread
             let detector = match loaded {
@@ -129,21 +118,7 @@ inventory::submit! {
         needs: &[],
         produces: &[Artifact::TextBoxes],
         load: |runtime, cpu| Box::pin(async move {
-            let sender = spawn_detector(runtime.clone(), cpu, false);
-            Ok(Box::new(Model { sender }) as Box<dyn Engine>)
-        }),
-    }
-}
-
-#[cfg(feature = "onnx")]
-inventory::submit! {
-    EngineInfo {
-        id: "comic-text-bubble-detector-onnx",
-        name: "Comic Text & Bubble Detector (ONNX)",
-        needs: &[],
-        produces: &[Artifact::TextBoxes],
-        load: |runtime, cpu| Box::pin(async move {
-            let sender = spawn_detector(runtime.clone(), cpu, true);
+            let sender = spawn_detector(runtime.clone(), cpu);
             Ok(Box::new(Model { sender }) as Box<dyn Engine>)
         }),
     }
