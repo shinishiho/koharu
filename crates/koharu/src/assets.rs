@@ -27,6 +27,17 @@ pub fn from_context<R: tauri::Runtime>(context: &mut tauri::Context<R>) -> Asset
 
     let assets: Arc<dyn tauri::Assets<R>> = context.set_assets(Box::new(Empty)).into();
 
+    // `tauri::generate_context!` only embeds the frontend when the `tauri`
+    // crate's `custom-protocol` feature is on, which `tauri build` passes and a
+    // plain `cargo build` does not. Without it every lookup below misses and the
+    // window shows axum's bare "not found", which says nothing about why.
+    if assets.iter().next().is_none() {
+        tracing::error!(
+            "no frontend embedded in this binary: build with `cargo build --release -p koharu \
+             --features tauri/custom-protocol`, or via `npx @tauri-apps/cli build`"
+        );
+    }
+
     Arc::new(move |path: &str| {
         let key = tauri::utils::assets::AssetKey::from(path);
         let bytes = assets.get(&key)?.into_owned();

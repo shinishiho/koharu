@@ -144,7 +144,11 @@ pub async fn run() -> Result<()> {
             });
 
             let cfg = handle.config();
-            let url: tauri::Url = if cfg!(debug_assertions) {
+            // `dev` (not `debug_assertions`): it tracks whether the frontend was
+            // embedded, which is what decides where there is a UI to point at.
+            // A debug build made with `--features tauri/custom-protocol` carries
+            // its own UI and should use it.
+            let url: tauri::Url = if cfg!(dev) {
                 cfg.build
                     .dev_url
                     .as_ref()
