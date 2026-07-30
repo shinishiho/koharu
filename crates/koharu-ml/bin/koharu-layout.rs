@@ -36,10 +36,10 @@ struct Cli {
 /// One colour per class id, in the export's class order.
 fn color_for_label(label_id: usize) -> Rgba<u8> {
     match label_id {
-        0 => Rgba([0, 160, 255, 255]),   // text
-        1 => Rgba([255, 64, 200, 255]),  // onomatopoeia
-        2 => Rgba([0, 255, 0, 255]),     // bubble
-        3 => Rgba([255, 176, 0, 255]),   // panel
+        0 => Rgba([0, 160, 255, 255]),  // text
+        1 => Rgba([255, 64, 200, 255]), // onomatopoeia
+        2 => Rgba([0, 255, 0, 255]),    // bubble
+        3 => Rgba([255, 176, 0, 255]),  // panel
         _ => Rgba([255, 255, 255, 255]),
     }
 }
@@ -69,8 +69,8 @@ fn blend_mask(image: &mut RgbaImage, region: &LayoutRegion, color: Rgba<u8>) {
         }
         for channel in 0..3 {
             // 40% of the class colour over the page.
-            pixel.0[channel] = ((pixel.0[channel] as u32 * 3 + color.0[channel] as u32 * 2) / 5)
-                .min(255) as u8;
+            pixel.0[channel] =
+                ((pixel.0[channel] as u32 * 3 + color.0[channel] as u32 * 2) / 5).min(255) as u8;
         }
     }
 }

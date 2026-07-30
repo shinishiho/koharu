@@ -12,7 +12,9 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result, bail};
-use image::{DynamicImage, GenericImageView, GrayImage, Luma, Rgb, Rgb32FImage, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImageView, GrayImage, Luma, Rgb, Rgb32FImage, imageops::FilterType,
+};
 use koharu_runtime::RuntimeManager;
 use ort::value::{Shape, Tensor};
 use serde::{Deserialize, Serialize};
@@ -112,10 +114,8 @@ impl KoharuLayoutDetector {
         let config_path = downloads
             .huggingface_model(HF_REPO, CONFIG_FILENAME)
             .await?;
-        let config: LayoutOnnxConfig =
-            serde_json::from_slice(&std::fs::read(&config_path)?).with_context(|| {
-                format!("failed to parse {}", config_path.display())
-            })?;
+        let config: LayoutOnnxConfig = serde_json::from_slice(&std::fs::read(&config_path)?)
+            .with_context(|| format!("failed to parse {}", config_path.display()))?;
         let model_path = downloads.huggingface_model(HF_REPO, ONNX_FILENAME).await?;
 
         let input_name = config.input.name.clone();
@@ -189,7 +189,11 @@ impl KoharuLayoutDetector {
                 }
 
                 let mask_maps = if masks {
-                    Some(outputs["masks"].try_extract_tensor::<f32>().map_err(ort_err)?)
+                    Some(
+                        outputs["masks"]
+                            .try_extract_tensor::<f32>()
+                            .map_err(ort_err)?,
+                    )
                 } else {
                     None
                 };
@@ -217,9 +221,9 @@ impl KoharuLayoutDetector {
                             page_height as f32,
                         );
                         let mask = match mask_maps {
-                            Some((shape, data)) => Some(decode_mask(
-                                shape, data, query, page_width, page_height,
-                            )?),
+                            Some((shape, data)) => {
+                                Some(decode_mask(shape, data, query, page_width, page_height)?)
+                            }
                             None => None,
                         };
                         regions.push(LayoutRegion {
@@ -272,12 +276,8 @@ impl KoharuLayoutDetector {
                 pixel[2] as f32 * scale,
             ])
         });
-        let resized = image::imageops::resize(
-            &scaled,
-            width as u32,
-            height as u32,
-            FilterType::Triangle,
-        );
+        let resized =
+            image::imageops::resize(&scaled, width as u32, height as u32, FilterType::Triangle);
 
         let pixel_count = width * height;
         let mut pixels = vec![0f32; pixel_count * 3];
@@ -336,7 +336,11 @@ fn decode_mask(
     });
     let resized = image::imageops::resize(&small, page_width, page_height, FilterType::Triangle);
     Ok(GrayImage::from_fn(page_width, page_height, |x, y| {
-        Luma([if resized.get_pixel(x, y).0[0] >= 128 { 255 } else { 0 }])
+        Luma([if resized.get_pixel(x, y).0[0] >= 128 {
+            255
+        } else {
+            0
+        }])
     }))
 }
 
@@ -347,9 +351,15 @@ mod tests {
     #[test]
     fn scale_box_converts_center_form_and_clamps() {
         // Centered half-size box on a 100x200 page.
-        assert_eq!(scale_box(&[0.5, 0.5, 0.5, 0.5], 100.0, 200.0), [25.0, 50.0, 75.0, 150.0]);
+        assert_eq!(
+            scale_box(&[0.5, 0.5, 0.5, 0.5], 100.0, 200.0),
+            [25.0, 50.0, 75.0, 150.0]
+        );
         // Box running off the top-left is clipped, not negative.
-        assert_eq!(scale_box(&[0.1, 0.1, 0.5, 0.5], 100.0, 200.0), [0.0, 0.0, 35.0, 70.0]);
+        assert_eq!(
+            scale_box(&[0.1, 0.1, 0.5, 0.5], 100.0, 200.0),
+            [0.0, 0.0, 35.0, 70.0]
+        );
     }
 
     #[test]
