@@ -58,7 +58,6 @@ pub async fn run() -> Result<()> {
                 .with_default_directive(tracing::Level::INFO.into())
                 .from_env_lossy(),
         )
-        .with(crate::sentry::tracing_layer())
         .with(crate::tracing::TimingLayer::new())
         .init();
 
