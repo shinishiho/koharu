@@ -1,4 +1,6 @@
 mod model;
+#[cfg(feature = "onnx")]
+mod onnx;
 
 use std::{path::Path, path::PathBuf, time::Instant};
 
@@ -113,15 +115,25 @@ impl std::fmt::Display for AnimeTextYoloVariant {
 
 #[derive(Debug)]
 pub struct AnimeTextDetector {
-    model: Yolo12,
+    backend: Backend,
     variant: AnimeTextYoloVariant,
-    device: Device,
-    dtype: DType,
 }
 
-#[derive(Debug, Clone)]
-struct PreparedInput {
-    pixel_values: Tensor,
+#[derive(Debug)]
+enum Backend {
+    Candle {
+        model: Yolo12,
+        device: Device,
+        dtype: DType,
+    },
+    #[cfg(feature = "onnx")]
+    Onnx(onnx::OnnxDetector),
+}
+
+/// Where the letterboxed image sits inside the square input, so detections can
+/// be mapped back to source pixels.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Letterbox {
     original_width: u32,
     original_height: u32,
     pad_x: u32,
@@ -184,10 +196,29 @@ impl AnimeTextDetector {
         })?;
 
         Ok(Self {
-            model,
+            backend: Backend::Candle {
+                model,
+                device,
+                dtype,
+            },
             variant,
-            device,
-            dtype,
+        })
+    }
+
+    /// Same weights, run through ONNX Runtime on the upstream `model.onnx`
+    /// export instead of the hand-ported candle graph.
+    ///
+    /// The export carries no NMS (`nms: False`), so decode and suppression stay
+    /// shared with the candle path — only the forward pass differs.
+    #[cfg(feature = "onnx")]
+    pub async fn load_onnx(
+        runtime: &RuntimeManager,
+        variant: AnimeTextYoloVariant,
+        cpu: bool,
+    ) -> Result<Self> {
+        Ok(Self {
+            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, variant, cpu).await?),
+            variant,
         })
     }
 
@@ -208,9 +239,29 @@ impl AnimeTextDetector {
         nms_threshold: f32,
     ) -> Result<AnimeTextDetection> {
         let started = Instant::now();
-        let prepared = self.preprocess(image)?;
-        let outputs = self.model.forward(&prepared.pixel_values)?;
-        let regions = postprocess(&outputs, &prepared, confidence_threshold, nms_threshold)?;
+        let letterboxed = letterbox(image);
+        let predictions = match &self.backend {
+            Backend::Candle {
+                model,
+                device,
+                dtype,
+            } => {
+                let input = candle_input(&letterboxed, device, *dtype)?;
+                let outputs = model.forward(&input)?;
+                outputs
+                    .to_dtype(DType::F32)?
+                    .to_device(&Device::Cpu)?
+                    .i(0)?
+            }
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => detector.forward(&letterboxed)?,
+        };
+        let regions = postprocess(
+            &predictions,
+            &letterboxed.letterbox,
+            confidence_threshold,
+            nms_threshold,
+        )?;
         let text_blocks = regions_to_text_blocks(&regions);
 
         tracing::info!(
@@ -223,59 +274,65 @@ impl AnimeTextDetector {
         );
 
         Ok(AnimeTextDetection {
-            image_width: prepared.original_width,
-            image_height: prepared.original_height,
+            image_width: letterboxed.letterbox.original_width,
+            image_height: letterboxed.letterbox.original_height,
             variant: self.variant,
             regions,
             text_blocks,
         })
     }
+}
 
-    fn preprocess(&self, image: &DynamicImage) -> Result<PreparedInput> {
-        let rgb = image.to_rgb8();
-        let (original_width, original_height) = rgb.dimensions();
-        let scale = f32::min(
-            INPUT_SIZE as f32 / original_width.max(1) as f32,
-            INPUT_SIZE as f32 / original_height.max(1) as f32,
-        );
-        let resized_width = ((original_width as f32 * scale).round() as u32).clamp(1, INPUT_SIZE);
-        let resized_height = ((original_height as f32 * scale).round() as u32).clamp(1, INPUT_SIZE);
-        let pad_x = (INPUT_SIZE - resized_width) / 2;
-        let pad_y = (INPUT_SIZE - resized_height) / 2;
+/// The letterboxed square input plus the geometry needed to undo it. Shared by
+/// both backends so a box maps back the same way regardless of runtime.
+pub(crate) struct Letterboxed {
+    image: RgbImage,
+    letterbox: Letterbox,
+}
 
-        let resized = if resized_width == original_width && resized_height == original_height {
-            rgb
-        } else {
-            imageops::resize(&rgb, resized_width, resized_height, FilterType::Triangle)
-        };
+fn letterbox(image: &DynamicImage) -> Letterboxed {
+    let rgb = image.to_rgb8();
+    let (original_width, original_height) = rgb.dimensions();
+    let scale = f32::min(
+        INPUT_SIZE as f32 / original_width.max(1) as f32,
+        INPUT_SIZE as f32 / original_height.max(1) as f32,
+    );
+    let resized_width = ((original_width as f32 * scale).round() as u32).clamp(1, INPUT_SIZE);
+    let resized_height = ((original_height as f32 * scale).round() as u32).clamp(1, INPUT_SIZE);
+    let pad_x = (INPUT_SIZE - resized_width) / 2;
+    let pad_y = (INPUT_SIZE - resized_height) / 2;
 
-        let mut letterboxed =
-            RgbImage::from_pixel(INPUT_SIZE, INPUT_SIZE, Rgb([LETTERBOX_COLOR; 3]));
-        imageops::overlay(
-            &mut letterboxed,
-            &resized,
-            i64::from(pad_x),
-            i64::from(pad_y),
-        );
+    let resized = if resized_width == original_width && resized_height == original_height {
+        rgb
+    } else {
+        imageops::resize(&rgb, resized_width, resized_height, FilterType::Triangle)
+    };
 
-        let pixel_values = Tensor::from_vec(
-            letterboxed.into_raw(),
-            (1, INPUT_SIZE as usize, INPUT_SIZE as usize, 3),
-            &self.device,
-        )?
-        .permute((0, 3, 1, 2))?
-        .to_dtype(self.dtype)?;
-        let pixel_values = (pixel_values * (1.0 / 255.0))?;
+    let mut canvas = RgbImage::from_pixel(INPUT_SIZE, INPUT_SIZE, Rgb([LETTERBOX_COLOR; 3]));
+    imageops::overlay(&mut canvas, &resized, i64::from(pad_x), i64::from(pad_y));
 
-        Ok(PreparedInput {
-            pixel_values,
+    Letterboxed {
+        image: canvas,
+        letterbox: Letterbox {
             original_width,
             original_height,
             pad_x,
             pad_y,
             scale,
-        })
+        },
     }
+}
+
+fn candle_input(letterboxed: &Letterboxed, device: &Device, dtype: DType) -> Result<Tensor> {
+    let pixel_values = Tensor::from_slice(
+        letterboxed.image.as_raw(),
+        (1, INPUT_SIZE as usize, INPUT_SIZE as usize, 3),
+        device,
+    )?
+    .permute((0, 3, 1, 2))?
+    .to_dtype(dtype)?;
+
+    Ok((pixel_values * (1.0 / 255.0))?)
 }
 
 pub async fn prefetch(runtime: &RuntimeManager) -> Result<()> {
@@ -301,16 +358,14 @@ async fn resolve_model_path(
         .with_context(|| format!("failed to download {} from {}", variant.filename(), HF_REPO))
 }
 
+/// Decode a `(4 + NUM_CLASSES, anchors)` prediction plane into source-pixel
+/// regions. Backend-agnostic: candle and ONNX both hand over the same plane.
 fn postprocess(
-    outputs: &Tensor,
-    prepared: &PreparedInput,
+    pred: &Tensor,
+    letterbox: &Letterbox,
     confidence_threshold: f32,
     nms_threshold: f32,
 ) -> Result<Vec<AnimeTextRegion>> {
-    let pred = outputs
-        .to_dtype(DType::F32)?
-        .to_device(&Device::Cpu)?
-        .i(0)?;
     let (channels, anchors) = pred.dims2()?;
     let expected_channels = 4 + NUM_CLASSES;
     if channels != expected_channels {
@@ -341,7 +396,7 @@ fn postprocess(
                 values[0] + values[2] * 0.5,
                 values[1] + values[3] * 0.5,
             ],
-            prepared,
+            letterbox,
         );
         if bbox[2] <= bbox[0] || bbox[3] <= bbox[1] {
             continue;
@@ -379,16 +434,16 @@ fn postprocess(
     Ok(regions)
 }
 
-fn map_bbox_to_original(bbox: [f32; 4], prepared: &PreparedInput) -> [f32; 4] {
-    let width = prepared.original_width as f32;
-    let height = prepared.original_height as f32;
-    let pad_x = prepared.pad_x as f32;
-    let pad_y = prepared.pad_y as f32;
+fn map_bbox_to_original(bbox: [f32; 4], letterbox: &Letterbox) -> [f32; 4] {
+    let width = letterbox.original_width as f32;
+    let height = letterbox.original_height as f32;
+    let pad_x = letterbox.pad_x as f32;
+    let pad_y = letterbox.pad_y as f32;
     [
-        ((bbox[0] - pad_x) / prepared.scale).clamp(0.0, width),
-        ((bbox[1] - pad_y) / prepared.scale).clamp(0.0, height),
-        ((bbox[2] - pad_x) / prepared.scale).clamp(0.0, width),
-        ((bbox[3] - pad_y) / prepared.scale).clamp(0.0, height),
+        ((bbox[0] - pad_x) / letterbox.scale).clamp(0.0, width),
+        ((bbox[1] - pad_y) / letterbox.scale).clamp(0.0, height),
+        ((bbox[2] - pad_x) / letterbox.scale).clamp(0.0, width),
+        ((bbox[3] - pad_y) / letterbox.scale).clamp(0.0, height),
     ]
 }
 
@@ -416,14 +471,11 @@ fn regions_to_text_blocks(regions: &[AnimeTextRegion]) -> Vec<TextRegion> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PreparedInput, map_bbox_to_original};
-    use candle_core::{DType, Device, Tensor};
+    use super::{Letterbox, map_bbox_to_original};
 
     #[test]
     fn map_bbox_to_original_removes_letterbox_padding() {
-        let prepared = PreparedInput {
-            pixel_values: Tensor::zeros((1, 3, 640, 640), DType::F32, &Device::Cpu)
-                .expect("tensor"),
+        let letterbox = Letterbox {
             original_width: 1000,
             original_height: 500,
             pad_x: 0,
@@ -431,7 +483,7 @@ mod tests {
             scale: 0.64,
         };
 
-        let bbox = map_bbox_to_original([100.0, 200.0, 540.0, 440.0], &prepared);
+        let bbox = map_bbox_to_original([100.0, 200.0, 540.0, 440.0], &letterbox);
         assert!((bbox[0] - 156.25).abs() < 1e-3);
         assert!((bbox[1] - 62.5).abs() < 1e-3);
         assert!((bbox[2] - 843.75).abs() < 1e-3);

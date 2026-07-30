@@ -28,6 +28,13 @@ pub struct OnnxSession {
     session: Mutex<Session>,
 }
 
+/// `ort::Session` isn't `Debug`, so detectors holding one can't derive it.
+impl std::fmt::Debug for OnnxSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OnnxSession").finish_non_exhaustive()
+    }
+}
+
 impl OnnxSession {
     /// Load `path`, using the platform's accelerated execution provider unless
     /// `cpu` is set.
