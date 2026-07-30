@@ -1,4 +1,6 @@
 mod dbnet;
+#[cfg(feature = "onnx")]
+mod onnx;
 mod postprocess;
 mod unet;
 mod yolo_v5;
@@ -53,11 +55,19 @@ koharu_runtime::declare_hf_model_package!(
 );
 
 pub struct ComicTextDetector {
-    yolo: yolo_v5::YoloV5,
-    unet: unet::UNet,
-    dbnet: Option<dbnet::DbNet>,
-    device: Device,
-    dtype: DType,
+    backend: Backend,
+}
+
+enum Backend {
+    Candle {
+        yolo: yolo_v5::YoloV5,
+        unet: unet::UNet,
+        dbnet: Option<dbnet::DbNet>,
+        device: Device,
+        dtype: DType,
+    },
+    #[cfg(feature = "onnx")]
+    Onnx(onnx::OnnxDetector),
 }
 
 impl ComicTextDetector {
@@ -111,18 +121,32 @@ impl ComicTextDetector {
         };
 
         Ok(Self {
-            yolo,
-            unet,
-            dbnet,
-            device,
-            dtype,
+            backend: Backend::Candle {
+                yolo,
+                unet,
+                dbnet,
+                device,
+                dtype,
+            },
+        })
+    }
+
+    /// The same three heads, run through ONNX Runtime on dmMaze's own export
+    /// instead of koharu's hand-ported graphs.
+    ///
+    /// One file covers detection and segmentation both, so there is no
+    /// segmentation-only variant to load.
+    #[cfg(feature = "onnx")]
+    pub async fn load_onnx(runtime: &RuntimeManager, cpu: bool) -> anyhow::Result<Self> {
+        Ok(Self {
+            backend: Backend::Onnx(onnx::OnnxDetector::load(runtime, cpu).await?),
         })
     }
 
     #[instrument(level = "debug", skip_all)]
     pub fn inference(&self, image: &DynamicImage) -> anyhow::Result<ComicTextDetection> {
         let original_dimensions = image.dimensions();
-        let (image_tensor, resized_dimensions) = preprocess(image, &self.device, self.dtype)?;
+        let (image_tensor, resized_dimensions) = self.preprocess(image)?;
         let (predictions, mask, shrink_threshold) = self.forward(&image_tensor)?;
 
         let bboxes = postprocess_yolo(&predictions, original_dimensions, resized_dimensions)?;
@@ -155,41 +179,74 @@ impl ComicTextDetector {
     #[instrument(level = "debug", skip_all)]
     pub fn inference_segmentation(&self, image: &DynamicImage) -> anyhow::Result<GrayImage> {
         let original_dimensions = image.dimensions();
-        let (image_tensor, resized_dimensions) = preprocess(image, &self.device, self.dtype)?;
+        let (image_tensor, resized_dimensions) = self.preprocess(image)?;
         let mask = self.forward_mask(&image_tensor)?;
         postprocess_unet_mask(&mask, original_dimensions, resized_dimensions)
     }
 
+    /// Letterbox into the square input the backend expects.
+    ///
+    /// The candle path halves the side on CPU to stay usable; the ONNX graph's
+    /// input is fixed at 1024², so it pays the full size either way.
+    fn preprocess(&self, image: &DynamicImage) -> anyhow::Result<(Tensor, (u32, u32))> {
+        match &self.backend {
+            Backend::Candle { device, dtype, .. } => {
+                let size = match device {
+                    Device::Cpu => CPU_DETECT_SIZE,
+                    _ => GPU_DETECT_SIZE,
+                };
+                preprocess(image, device, *dtype, size)
+            }
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(_) => preprocess(image, &Device::Cpu, DType::F32, onnx::INPUT_SIZE),
+        }
+    }
+
     #[instrument(level = "debug", skip_all)]
     fn forward(&self, image: &Tensor) -> anyhow::Result<(Tensor, Tensor, Tensor)> {
-        let (predictions, features) = self.yolo.forward(image)?;
-        let (mask, features) = self.unet.forward(
-            &features[0],
-            &features[1],
-            &features[2],
-            &features[3],
-            &features[4],
-        )?;
-        let dbnet = self
-            .dbnet
-            .as_ref()
-            .context("DBNet not loaded; use ComicTextDetector::load for full detection")?;
-        let shrink_thresh = dbnet.forward(&features[0], &features[1], &features[2])?;
+        match &self.backend {
+            Backend::Candle {
+                yolo, unet, dbnet, ..
+            } => {
+                let (predictions, features) = yolo.forward(image)?;
+                let (mask, features) = unet.forward(
+                    &features[0],
+                    &features[1],
+                    &features[2],
+                    &features[3],
+                    &features[4],
+                )?;
+                let dbnet = dbnet
+                    .as_ref()
+                    .context("DBNet not loaded; use ComicTextDetector::load for full detection")?;
+                let shrink_thresh = dbnet.forward(&features[0], &features[1], &features[2])?;
 
-        Ok((predictions, mask, shrink_thresh))
+                Ok((predictions, mask, shrink_thresh))
+            }
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => detector.forward(image),
+        }
     }
 
     #[instrument(level = "debug", skip_all)]
     fn forward_mask(&self, image: &Tensor) -> anyhow::Result<Tensor> {
-        let (_, features) = self.yolo.forward(image)?;
-        let (mask, _) = self.unet.forward(
-            &features[0],
-            &features[1],
-            &features[2],
-            &features[3],
-            &features[4],
-        )?;
-        Ok(mask)
+        match &self.backend {
+            Backend::Candle { yolo, unet, .. } => {
+                let (_, features) = yolo.forward(image)?;
+                let (mask, _) = unet.forward(
+                    &features[0],
+                    &features[1],
+                    &features[2],
+                    &features[3],
+                    &features[4],
+                )?;
+                Ok(mask)
+            }
+            // One graph, so the mask comes out of the same pass as everything
+            // else — the other two outputs are simply dropped.
+            #[cfg(feature = "onnx")]
+            Backend::Onnx(detector) => Ok(detector.forward(image)?.1),
+        }
     }
 }
 
@@ -198,12 +255,9 @@ fn preprocess(
     image: &DynamicImage,
     device: &Device,
     dtype: DType,
+    image_size: u32,
 ) -> anyhow::Result<(Tensor, (u32, u32))> {
     let (orig_w, orig_h) = image.dimensions();
-    let image_size = match device {
-        Device::Cpu => CPU_DETECT_SIZE,
-        _ => GPU_DETECT_SIZE,
-    };
     let (width, height) = if orig_w >= orig_h {
         (image_size, image_size * orig_h / orig_w)
     } else {
