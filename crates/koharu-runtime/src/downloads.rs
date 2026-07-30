@@ -11,7 +11,7 @@ use hf_hub::{
 };
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use koharu_core::events::{DownloadProgress, DownloadStatus};
-use reqwest::header::{CONTENT_LENGTH, RANGE};
+use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, RANGE};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 
@@ -34,6 +34,7 @@ const HF_METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Downloads {
     downloads_root: PathBuf,
     huggingface_cache: Cache,
+    hf_token: Option<String>,
     client: RuntimeHttpClient,
     tx: broadcast::Sender<DownloadProgress>,
     progress: Arc<MultiProgress>,
@@ -46,14 +47,21 @@ impl Downloads {
         http: &RuntimeHttpConfig,
     ) -> Result<Self> {
         let client = http.build_client()?;
+        let huggingface_cache = Cache::new(huggingface_root);
 
         Ok(Self {
             downloads_root,
-            huggingface_cache: Cache::new(huggingface_root),
+            hf_token: hf_token(&huggingface_cache),
+            huggingface_cache,
             client,
             tx: broadcast::channel(256).0,
             progress: Arc::new(MultiProgress::new()),
         })
+    }
+
+    /// Whether a HuggingFace access token was found. Gated repos need one.
+    pub fn has_hf_token(&self) -> bool {
+        self.hf_token.is_some()
     }
 
     pub fn client(&self) -> RuntimeHttpClient {
@@ -81,6 +89,9 @@ impl Downloads {
         let api = ApiBuilder::from_cache(self.huggingface_cache.clone())
             .with_progress(false)
             .with_user_agent("koharu", env!("CARGO_PKG_VERSION"))
+            // `from_cache` only reads a token file next to our own cache dir;
+            // `hf_token` also honors the env vars and the `hf auth login` file.
+            .with_token(self.hf_token.clone())
             .build()
             .context("failed to build HF Hub API")?;
         let repo_handle = api.model(repo.to_string());
@@ -89,6 +100,7 @@ impl Downloads {
         let metadata: Metadata = tokio::time::timeout(HF_METADATA_TIMEOUT, api.metadata(&url))
             .await
             .map_err(|_| anyhow::anyhow!("HF metadata request timed out for `{repo}/{filename}`"))?
+            .map_err(|error| self.explain_access(error.into(), repo))
             .with_context(|| format!("failed to fetch HF metadata for `{repo}/{filename}`"))?;
 
         let blob_path = cache_repo.blob_path(metadata.etag());
@@ -104,6 +116,7 @@ impl Downloads {
                 .ranged_download(&url, &blob_path, &reporter, Some(metadata.size() as u64))
                 .await
             {
+                let error = self.explain_access(error, repo);
                 reporter.fail(&error);
                 return Err(error.context(format!(
                     "failed to download HF model file `{repo}/{filename}`"
@@ -202,7 +215,6 @@ impl Downloads {
             .map(|(start, stop)| async move {
                 let range = format!("bytes={start}-{stop}");
                 let response = self
-                    .client
                     .get(url)
                     .header(RANGE, &range)
                     .send()
@@ -253,9 +265,57 @@ impl Downloads {
         Ok(())
     }
 
+    /// A GET carrying the HF token when — and only when — the URL is on
+    /// huggingface.co itself. The token must not ride along to arbitrary hosts
+    /// `cached_download` is pointed at. HF's `resolve` endpoint 302s to a signed
+    /// CDN URL on another host; reqwest strips `Authorization` across origins,
+    /// and the signature is what authorizes that leg.
+    fn get(&self, url: &str) -> reqwest_middleware::RequestBuilder {
+        self.authorized(self.client.get(url), url)
+    }
+
+    fn head(&self, url: &str) -> reqwest_middleware::RequestBuilder {
+        self.authorized(self.client.head(url), url)
+    }
+
+    fn authorized(
+        &self,
+        request: reqwest_middleware::RequestBuilder,
+        url: &str,
+    ) -> reqwest_middleware::RequestBuilder {
+        match &self.hf_token {
+            Some(token) if is_huggingface_url(url) => {
+                request.header(AUTHORIZATION, format!("Bearer {token}"))
+            }
+            _ => request,
+        }
+    }
+
+    /// Turn a 401/403 into something a user can act on. Gated repos are the
+    /// only reason koharu sees these, and the fix is off-machine (accept the
+    /// terms) plus on-machine (provide a token), so both halves get named.
+    fn explain_access(&self, error: anyhow::Error, repo: &str) -> anyhow::Error {
+        // ponytail: string sniffing — hf-hub buries the status in its error
+        // Display and our own path goes through reqwest's `error_for_status`.
+        // A typed check would mean matching two unrelated error enums.
+        let message = format!("{error:#}");
+        if !(message.contains("401") || message.contains("403")) {
+            return error;
+        }
+        let token_state = if self.has_hf_token() {
+            "the token found on this machine does not have access"
+        } else {
+            "no HuggingFace token was found on this machine"
+        };
+        error.context(format!(
+            "`{repo}` is a gated repository and {token_state}. \
+             Accept the terms at https://huggingface.co/{repo}, then set HF_TOKEN \
+             (or run `hf auth login`)"
+        ))
+    }
+
     async fn probe_content_length(&self, url: &str) -> Result<u64> {
         let response = self
-            .client
             .head(url)
             .send()
             .await
@@ -358,6 +418,39 @@ impl TransferReporter {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Find a HuggingFace access token, needed for gated repos.
+///
+/// Order: `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN` (both what the Python
+/// tooling reads), then a `token` file beside koharu's own model cache, then
+/// the shared one `hf auth login` writes. Env first so a shell can override a
+/// stale login without deleting files.
+fn hf_token(cache: &Cache) -> Option<String> {
+    let from_env = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .find(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string());
+
+    from_env
+        .or_else(|| cache.token())
+        .or_else(|| Cache::default().token())
+}
+
+/// Whether `url` is on huggingface.co itself, as opposed to a CDN or a
+/// third-party host. Subdomains count — the Hub serves `resolve` from the apex
+/// but LFS metadata from siblings.
+fn is_huggingface_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    parsed
+        .host_str()
+        .is_some_and(|host| host == "huggingface.co" || host.ends_with(".huggingface.co"))
+}
+
 fn part_path(destination: &Path) -> Result<PathBuf> {
     let file_name = destination.file_name().ok_or_else(|| {
         anyhow::anyhow!(
@@ -372,11 +465,25 @@ fn part_path(destination: &Path) -> Result<PathBuf> {
 mod tests {
     use std::path::Path;
 
-    use super::part_path;
+    use super::{is_huggingface_url, part_path};
 
     #[test]
     fn partial_download_path_appends_suffix() {
         let part = part_path(Path::new("/tmp/models/config.json")).unwrap();
         assert_eq!(part, Path::new("/tmp/models/config.json.part"));
+    }
+
+    #[test]
+    fn only_huggingface_hosts_receive_the_token() {
+        assert!(is_huggingface_url(
+            "https://huggingface.co/deepghs/AnimeText_yolo/resolve/main/model.onnx"
+        ));
+        assert!(is_huggingface_url("https://cdn-lfs.huggingface.co/repos/x"));
+        // Lookalikes and plain HTTP must never see an Authorization header.
+        assert!(!is_huggingface_url("https://huggingface.co.evil.test/x"));
+        assert!(!is_huggingface_url("https://nothuggingface.co/x"));
+        assert!(!is_huggingface_url("http://huggingface.co/x"));
+        assert!(!is_huggingface_url("https://github.com/x"));
+        assert!(!is_huggingface_url("not a url"));
     }
 }
