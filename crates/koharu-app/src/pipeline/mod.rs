@@ -8,6 +8,7 @@
 pub mod artifacts;
 pub mod engine;
 mod engines;
+pub mod fusion;
 
 pub use artifacts::Artifact;
 pub use engine::{
