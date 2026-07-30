@@ -95,16 +95,13 @@ See [Acceleration and Runtime](../explanation/acceleration-and-runtime.md) for d
 
 ## Docs
 
-Docs live under `docs/en-US/`, `docs/ja-JP/`, `docs/zh-CN/`, and `docs/pt-BR/`. Build each locale you touched:
+Docs live under `docs/en-US/`. Build the documentation site with:
 
 ```bash
 zensical build -f docs/zensical.toml -c
-zensical build -f docs/zensical.ja-JP.toml
-zensical build -f docs/zensical.zh-CN.toml
-zensical build -f docs/zensical.pt-BR.toml
 ```
 
-If you add a new page, register it in the matching `zensical*.toml` nav.
+If you add a new page, register it in the `docs/zensical.toml` nav.
 
 ## Before Opening a PR
 
@@ -113,7 +110,7 @@ Run the checks that match what you changed. You do not need to run everything on
 - **Rust changes** — `bun cargo fmt -- --check`, `bun cargo check`, `bun cargo clippy -- -D warnings`, `bun cargo test --workspace --tests`
 - **UI changes** — `bun run format` and `bun run test:ui`
 - **Desktop integration** — `bun run build`
-- **Docs** — build every locale you edited
+- **Docs** — build the documentation site
 
 ## Pull Request Expectations
 

@@ -32,7 +32,6 @@ We welcome and appreciate any form of contribution.
 
 - Improve getting-started guides and how-tos
 - Add examples, screenshots, or short tutorials
-- Translate content to other languages
 
 ### Testing
 
@@ -61,7 +60,7 @@ Koharu is organized as a Rust workspace with a Tauri shell and a Next.js UI:
 - **`koharu-runtime/`** — runtime and model download management
 - **`ui/`** — Next.js web UI
 - **`tests/`** — Playwright end-to-end tests
-- **`docs/`** — documentation site (English, 日本語, 简体中文, Português)
+- **`docs/`** — documentation site
 
 ## Your First Contribution
 

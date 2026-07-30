@@ -22,9 +22,6 @@ jobs:
           python-version: 3.x
       - run: pip install zensical
       - run: zensical build -f docs/zensical.toml --clean
-      - run: zensical build -f docs/zensical.ja-JP.toml
-      - run: zensical build -f docs/zensical.zh-CN.toml
-      - run: zensical build -f docs/zensical.pt-BR.toml
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/site
