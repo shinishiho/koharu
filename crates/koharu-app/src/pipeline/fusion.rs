@@ -1,6 +1,6 @@
 //! Multi-detector fusion geometry.
 //!
-//! Detectors disagree. Layout (RF-DETR) and RT-DETR both propose balloons;
+//! Detectors disagree. The layout model and RT-DETR both propose balloons;
 //! AnimeText, RT-DETR and comic-text-detector all propose text. Union of
 //! everything maximizes recall but erasing a false positive is destructive, so
 //! fusion separates the two questions: *is there something here* (keep it, for
@@ -15,7 +15,9 @@
 /// two boxes from the same model are one vote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Detector {
-    /// RF-DETR-Seg layout model: text / onomatopoeia / bubble / panel.
+    /// Structural layout model: text / onomatopoeia / bubble / panel, with
+    /// instance masks. No such model is wired up yet — the acceptance rules
+    /// depend on one, so the variant exists ahead of it.
     Layout,
     /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free.
     RtDetr,
