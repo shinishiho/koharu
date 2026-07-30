@@ -43,6 +43,9 @@ ort = { workspace = true, optional = true, features = ["coreml"] }
 
 [features]
 onnx = ["ort"]
+# CUDA for the ONNX path only. The full `cuda` feature drags in
+# candle-flash-attn, which needs sm_80+; this one builds on older cards.
+onnx-cuda = ["onnx", "ort?/cuda"]
 cuda = [
     "ort?/cuda",
     "candle-core/cuda",

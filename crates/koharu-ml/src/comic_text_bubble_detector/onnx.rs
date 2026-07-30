@@ -86,7 +86,7 @@ impl OnnxDetector {
                     .with_execution_providers([ort::ep::coreml::CoreML::default().build()])
                     .map_err(ort_err)?;
             }
-            #[cfg(feature = "cuda")]
+            #[cfg(any(feature = "cuda", feature = "onnx-cuda"))]
             {
                 builder = builder
                     .with_execution_providers([ort::ep::cuda::CUDA::default().build()])
