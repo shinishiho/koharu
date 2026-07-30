@@ -64,32 +64,29 @@ impl OnnxFontDetector {
     pub(super) fn forward(&self, batch: &Tensor) -> Result<Vec<Vec<f32>>> {
         let (count, _, height, width) = batch.dims4()?;
         let values = batch.flatten_all()?.to_vec1::<f32>()?;
-        let input = OrtTensor::from_array((
-            vec![count as i64, 3, height as i64, width as i64],
-            values,
-        ))
-        .map_err(ort_err)?;
+        let input =
+            OrtTensor::from_array((vec![count as i64, 3, height as i64, width as i64], values))
+                .map_err(ort_err)?;
 
-        self.session
-            .run(ort::inputs!["input" => input], |outputs| {
-                let (shape, data) = outputs["output"]
-                    .try_extract_tensor::<f32>()
-                    .map_err(ort_err)
-                    .context("failed to read font detector ONNX output")?;
-                let dims = shape.iter().map(|d| *d as usize).collect::<Vec<_>>();
-                let [rows, columns] = dims[..] else {
-                    bail!("unexpected font detector ONNX output rank {dims:?}, expected 2 dims");
-                };
-                if columns != OUTPUT_WIDTH {
-                    bail!(
-                        "unexpected font detector ONNX output width {columns}, expected {OUTPUT_WIDTH}"
-                    );
-                }
-                if rows != count {
-                    bail!("font detector ONNX returned {rows} rows for {count} images");
-                }
-                Ok(data.chunks_exact(columns).map(<[f32]>::to_vec).collect())
-            })
+        self.session.run(ort::inputs!["input" => input], |outputs| {
+            let (shape, data) = outputs["output"]
+                .try_extract_tensor::<f32>()
+                .map_err(ort_err)
+                .context("failed to read font detector ONNX output")?;
+            let dims = shape.iter().map(|d| *d as usize).collect::<Vec<_>>();
+            let [rows, columns] = dims[..] else {
+                bail!("unexpected font detector ONNX output rank {dims:?}, expected 2 dims");
+            };
+            if columns != OUTPUT_WIDTH {
+                bail!(
+                    "unexpected font detector ONNX output width {columns}, expected {OUTPUT_WIDTH}"
+                );
+            }
+            if rows != count {
+                bail!("font detector ONNX returned {rows} rows for {count} images");
+            }
+            Ok(data.chunks_exact(columns).map(<[f32]>::to_vec).collect())
+        })
     }
 }
 

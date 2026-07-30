@@ -162,8 +162,8 @@ async fn read_threshold(runtime: &RuntimeManager, directory: &str) -> Option<f32
             .downloads()
             .huggingface_model(HF_REPO, &filename)
             .await?;
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("failed to read `{}`", path.display()))?;
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read `{}`", path.display()))?;
         Ok::<f32, anyhow::Error>(serde_json::from_slice::<ThresholdFile>(&bytes)?.threshold)
     };
 
@@ -189,8 +189,14 @@ mod tests {
 
     #[test]
     fn variant_directory_matches_the_repo_layout() {
-        assert_eq!(variant_directory(AnimeTextYoloVariant::X), "yolo12x_animetext");
-        assert_eq!(variant_directory(AnimeTextYoloVariant::N), "yolo12n_animetext");
+        assert_eq!(
+            variant_directory(AnimeTextYoloVariant::X),
+            "yolo12x_animetext"
+        );
+        assert_eq!(
+            variant_directory(AnimeTextYoloVariant::N),
+            "yolo12n_animetext"
+        );
     }
 
     #[test]
