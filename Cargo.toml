@@ -160,7 +160,6 @@ linux-keyutils-keyring-store = "1.0"
 lru = "0.18"
 llguidance = "1.7.5"
 petname = "3"
-sentry = { version = "0.48", features = ["tracing"] }
 fast-glob = "1.0"
 tar = "0.4"
 toktrie = "1.7.5"

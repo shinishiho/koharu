@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 pub fn install() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -15,10 +13,6 @@ pub fn install() {
             .location()
             .map(|l| format!("{}:{}", l.file(), l.line()))
             .unwrap_or_default();
-
-        if let Some(client) = sentry::Hub::current().client() {
-            client.flush(Some(Duration::from_secs(2)));
-        }
 
         rfd::MessageDialog::new()
             .set_level(rfd::MessageLevel::Error)

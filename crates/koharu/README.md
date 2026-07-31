@@ -357,7 +357,7 @@ the current settings view.
 provider keys through the platform credential store. The trusted settings UI
 receives their values
 so users can reveal and edit them; the TOML file stores only a redacted value.
-Logs, errors, Sentry events, recent-file metadata, job descriptions, and
+Logs, errors, recent-file metadata, job descriptions, and
 resource URLs must not contain secrets or page text/image content.
 
 UI-only preferences such as theme, panel sizes, and shortcuts may stay in
@@ -373,7 +373,7 @@ itself is not inserted into the scene database.
 
 Startup order is deterministic:
 
-1. initialize Sentry, the panic hook, tracing, and platform fixes;
+1. initialize the panic hook, tracing, and platform fixes;
 2. load live app, HTTP, and pipeline configuration handles;
 3. create the background runtime, `Pipeline`, font service, and job channel;
 4. select the trusted frontend: a localhost development URL only in debug, or
@@ -450,7 +450,6 @@ crates/koharu-app/src/
 crates/koharu/src/
   main.rs
   panic.rs
-  sentry.rs
   tracing.rs
   version.rs
   windows.rs
@@ -467,7 +466,6 @@ src/
 â”œâ”€â”€ export.rs        scene-to-raster/PSD wiring
 â”œâ”€â”€ resources.rs     trusted UI assets and bounded thumbnail protocol
 â”œâ”€â”€ panic.rs
-â”œâ”€â”€ sentry.rs
 â”œâ”€â”€ tracing.rs
 â”œâ”€â”€ version.rs
 â””â”€â”€ windows.rs

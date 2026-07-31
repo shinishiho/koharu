@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use koharu::panic;
-use koharu::sentry;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 #[derive(Debug, Parser)]
@@ -17,7 +16,6 @@ struct Arguments {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let arguments = Arguments::parse();
-    let _guard = sentry::initialize();
     panic::install();
     tracing_subscriber::registry()
         .with(
@@ -25,7 +23,6 @@ async fn main() -> anyhow::Result<()> {
                 .with_default_directive(tracing::Level::INFO.into())
                 .from_env_lossy(),
         )
-        .with(sentry::tracing_layer())
         .with(koharu::tracing::TimingLayer::new())
         .init();
     koharu_app::app::run(arguments.project)

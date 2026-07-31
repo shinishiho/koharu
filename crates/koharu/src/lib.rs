@@ -1,5 +1,4 @@
 pub mod panic;
-pub mod sentry;
 pub mod tracing;
 pub mod version;
 #[cfg(target_os = "windows")]
