@@ -327,11 +327,7 @@ impl Downloads {
     /// only reason koharu sees these, and the fix is off-machine (accept the
     /// terms) plus on-machine (provide a token), so both halves get named.
     fn explain_access(&self, error: anyhow::Error, repo: &str) -> anyhow::Error {
-        // ponytail: string sniffing — hf-hub buries the status in its error
-        // Display and our own path goes through reqwest's `error_for_status`.
-        // A typed check would mean matching two unrelated error enums.
-        let message = format!("{error:#}");
-        if !(message.contains("401") || message.contains("403")) {
+        if !denies_access(&error) {
             return error;
         }
         let token_state = if self.has_hf_token() {
@@ -468,6 +464,34 @@ fn hf_token(cache: &Cache) -> Option<String> {
         .or_else(|| Cache::default().token())
 }
 
+/// Whether an error is the Hub refusing access — 401 or 403.
+///
+/// Prefers the typed status off any `reqwest::Error` in the chain, which is
+/// what our own `error_for_status` path produces. hf-hub only renders its
+/// status into the message, so that case falls back to matching the rendered
+/// status line rather than the bare digits: a repo named `sd-403` or a
+/// `Content-Length: 4030` must not read as a permission failure.
+fn denies_access(error: &anyhow::Error) -> bool {
+    let status = error
+        .chain()
+        .filter_map(|source| source.downcast_ref::<reqwest::Error>())
+        .find_map(reqwest::Error::status);
+    if let Some(status) = status {
+        return status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN;
+    }
+
+    let message = format!("{error:#}");
+    [
+        "401 Unauthorized",
+        "403 Forbidden",
+        "status code: 401",
+        "status code: 403",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
 /// Whether `url` is on huggingface.co itself, as opposed to a CDN or a
 /// third-party host. Subdomains count — the Hub serves `resolve` from the apex
 /// but LFS metadata from siblings.
@@ -497,7 +521,7 @@ fn part_path(destination: &Path) -> Result<PathBuf> {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{Downloads, is_huggingface_url, part_path};
+    use super::{Downloads, denies_access, is_huggingface_url, part_path};
     use crate::runtime::RuntimeHttpConfig;
 
     /// A `Downloads` with a known discovered token, standing in for one found in
@@ -550,6 +574,31 @@ mod tests {
     fn partial_download_path_appends_suffix() {
         let part = part_path(Path::new("/tmp/models/config.json")).unwrap();
         assert_eq!(part, Path::new("/tmp/models/config.json.part"));
+    }
+
+    #[test]
+    fn access_denial_is_not_inferred_from_stray_digits() {
+        // hf-hub renders its status into the message; these are the shapes that
+        // mean the Hub said no.
+        for rendered in [
+            "request error: 401 Unauthorized",
+            "403 Forbidden",
+            "http status code: 403",
+        ] {
+            assert!(denies_access(&anyhow::anyhow!("{rendered}")), "{rendered}");
+        }
+
+        // …and these are the ones that merely contain the digits. Before the
+        // typed check these all produced gated-repo advice for an unrelated
+        // failure.
+        for innocent in [
+            "failed to download `someone/sd-403-anime`",
+            "connection closed after 401 bytes",
+            "failed to fetch range bytes=4030-8060",
+            "no such host",
+        ] {
+            assert!(!denies_access(&anyhow::anyhow!("{innocent}")), "{innocent}");
+        }
     }
 
     #[test]

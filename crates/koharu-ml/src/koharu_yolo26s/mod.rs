@@ -96,6 +96,14 @@ impl Yolo26sClass {
             Self::OnomatopoeiaText => "onomatopoeia_text",
         }
     }
+
+    /// Every class, for callers that want masks on all of them.
+    pub const ALL: [Self; 4] = [
+        Self::Frame,
+        Self::DialogueText,
+        Self::Balloon,
+        Self::OnomatopoeiaText,
+    ];
 }
 
 impl std::fmt::Display for Yolo26sClass {
@@ -161,17 +169,27 @@ impl KoharuYolo26sDetector {
         Ok(Self { session })
     }
 
-    /// Detect at the export's recommended confidence.
-    pub fn inference(&self, image: &DynamicImage, masks: bool) -> Result<Yolo26sDetection> {
+    /// Detect at the export's recommended confidence, decoding instance masks
+    /// for the classes in `masks` (`&[]` for none).
+    pub fn inference(
+        &self,
+        image: &DynamicImage,
+        masks: &[Yolo26sClass],
+    ) -> Result<Yolo26sDetection> {
         self.inference_with_threshold(image, DEFAULT_CONFIDENCE_THRESHOLD, masks)
     }
 
+    /// `masks` selects *which classes* get their instance mask decoded, because
+    /// decoding is per-instance page-sized resampling and callers usually read
+    /// one or two classes' masks. The matmul that produces the probabilities is
+    /// shared and cheap; `mask_to_page` is what costs, so it runs only for the
+    /// instances that were asked for.
     #[instrument(level = "debug", skip_all)]
     pub fn inference_with_threshold(
         &self,
         image: &DynamicImage,
         confidence_threshold: f32,
-        masks: bool,
+        masks: &[Yolo26sClass],
     ) -> Result<Yolo26sDetection> {
         let letterboxed = letterbox(image);
         let geometry = letterboxed.letterbox;
@@ -181,7 +199,9 @@ impl KoharuYolo26sDetector {
             self.session
                 .run(ort::inputs!["images" => input], |outputs| {
                     let instances = read_instances(outputs, &geometry, confidence_threshold)?;
-                    let prototypes = if masks && !instances.is_empty() {
+                    let wanted =
+                        !masks.is_empty() && instances.iter().any(|i| masks.contains(&i.class));
+                    let prototypes = if wanted {
                         Some(read_prototypes(outputs)?)
                     } else {
                         None
@@ -190,15 +210,21 @@ impl KoharuYolo26sDetector {
                 })?;
 
         let instances = dedup(instances);
-        let mut decoded = match &prototypes {
-            Some(prototypes) if !instances.is_empty() => {
-                decode_masks(&instances, prototypes, &geometry)?
-                    .into_iter()
-                    .map(Some)
-                    .collect()
+        let mut decoded: Vec<Option<GrayImage>> = vec![None; instances.len()];
+        if let Some(prototypes) = &prototypes {
+            let selected: Vec<(usize, &Instance)> = instances
+                .iter()
+                .enumerate()
+                .filter(|(_, instance)| masks.contains(&instance.class))
+                .collect();
+            let wanted: Vec<&Instance> = selected.iter().map(|(_, i)| *i).collect();
+            for ((at, _), mask) in selected
+                .iter()
+                .zip(decode_masks(&wanted, prototypes, &geometry)?)
+            {
+                decoded[*at] = Some(mask);
             }
-            _ => vec![None; instances.len()],
-        };
+        }
 
         let regions = instances
             .into_iter()
@@ -454,12 +480,15 @@ fn iou(a: [f32; 4], b: [f32; 4]) -> f32 {
     }
 }
 
-/// Every instance mask in one matmul: `sigmoid(coefficients · prototypes)`.
+/// Every requested instance mask in one matmul: `sigmoid(coefficients · prototypes)`.
 fn decode_masks(
-    instances: &[Instance],
+    instances: &[&Instance],
     prototypes: &Prototypes,
     letterbox: &Letterbox,
 ) -> Result<Vec<GrayImage>> {
+    if instances.is_empty() {
+        return Ok(Vec::new());
+    }
     let coefficients: Vec<f32> = instances
         .iter()
         .flat_map(|instance| instance.coefficients.iter().copied())

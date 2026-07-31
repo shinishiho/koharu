@@ -16,14 +16,14 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Detector {
     /// Structural layout model: text / onomatopoeia / bubble / panel, with
-    /// instance masks — `koharu_ml::koharu_yolo26s`. The `koharu-yolo26s`
-    /// engine runs this one; it is the pipeline's only detector.
+    /// instance masks — `koharu_ml::koharu_yolo26s`. The only voter that
+    /// segments, which is what `Candidate::has_mask` marks.
     Layout,
-    /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free. Model only — the
-    /// engine is gone, so nothing feeds this in until fusion runs the models
-    /// itself rather than reading one engine's output.
+    /// ogkalu RT-DETR-v2: bubble / text_bubble / text_free. The second opinion
+    /// on balloons, which is what lets a balloon reach two votes.
     RtDetr,
-    /// AnimeText YOLO12x: broad text boxes. Model only, same as `RtDetr`.
+    /// AnimeText YOLO12x: broad text boxes. The one voter that can be absent —
+    /// its repo is gated — so nothing here may assume four detectors.
     AnimeText,
     /// comic-text-detector: text boxes plus the authoritative pixel mask.
     ComicTextDetector,
@@ -49,7 +49,18 @@ pub struct Candidate {
     pub score: f32,
     /// The detector also produced an instance mask for this box. Only the
     /// layout model does; a masked balloon is self-confirming evidence.
+    ///
+    /// This is a *detector* discriminator, not a measurement — it says the
+    /// proposal came from the one model that segments. Use `mask_fill` when the
+    /// question is what the mask actually contains.
     pub has_mask: bool,
+    /// Fraction of `bbox` the detector's own instance mask lights, when that
+    /// mask was decoded. `None` means it was not.
+    ///
+    /// Distinct from `has_mask` because every layout instance carries mask
+    /// coefficients: "a mask exists" is true by construction and discriminates
+    /// nothing within a class only that model proposes.
+    pub mask_fill: Option<f32>,
 }
 
 /// How a fused text region relates to the page.
@@ -83,6 +94,9 @@ pub struct FusedRegion {
     pub accepted: bool,
     /// Index into `Fusion::bubbles` for `Role::Dialogue`.
     pub bubble: Option<usize>,
+    /// Best instance-mask fill among the candidates, carried out so the
+    /// threshold that reads it can be measured against real pages.
+    pub mask_fill: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -115,6 +129,26 @@ pub struct FusionConfig {
     /// Layout-model score at which its own instance mask alone accepts a
     /// balloon with no second detector.
     pub strong_mask_score: f32,
+    /// Fraction of an SFX box its own instance mask must light for the mask to
+    /// count as having traced anything.
+    ///
+    /// A floor, not a filter. Only the layout model proposes SFX, so "an
+    /// instance mask exists" is true of every SFX candidate and rejects
+    /// nothing; this at least asks the mask what it found. Measured over 109
+    /// SFX regions on 40 watahazu pages: fill ran 0.082 to 0.696 with a median
+    /// of 0.307 and never approached zero, and it correlates only weakly with
+    /// whether the pixel text mask agrees there are glyphs there (r = 0.34,
+    /// 5th percentile 0.186 where CTD confirms against a 0.276 median where it
+    /// does not). So the value that would actually separate lettering from
+    /// artwork is not in this signal: every region accepted on the corpus had
+    /// fill >= 0.129, and past 0.15 the clause rejects more boxes CTD confirms
+    /// as text than boxes it doesn't.
+    ///
+    /// ponytail: set at the measured floor, which fires on no page in the
+    /// corpus. It buys the guarantee that a mask tracing nothing cannot
+    /// authorize an erase — the degenerate case `has_mask` could never reject.
+    /// Raising it needs labelled SFX, not more of this measurement.
+    pub sfx_mask_fill: f32,
 }
 
 impl Default for FusionConfig {
@@ -125,6 +159,7 @@ impl Default for FusionConfig {
             dialogue_ioa: 0.60,
             mask_coverage: 0.30,
             strong_mask_score: 0.50,
+            sfx_mask_fill: 0.13,
         }
     }
 }
@@ -180,20 +215,26 @@ pub fn fuse(
                 Some((index, _)) => (Role::Dialogue, Some(index), false),
                 // An SFX rectangle covers art as often as glyphs, so it takes
                 // two independent things to erase one: the layout model's own
-                // instance mask, which traces the strokes rather than the box,
-                // and glyph evidence from somewhere else — the pixel text mask
-                // or another detector's text box. Either alone stays a
-                // proposal. The mask without a second opinion is only as good
-                // as the class call that produced it, and glyph evidence
-                // without a mask says text is *somewhere* in a rectangle that
-                // may be mostly artwork.
+                // instance mask having traced strokes inside the box, and glyph
+                // evidence from somewhere else — the pixel text mask or another
+                // detector's text box. Either alone stays a proposal. The mask
+                // without a second opinion is only as good as the class call
+                // that produced it, and glyph evidence without a mask says text
+                // is *somewhere* in a rectangle that may be mostly artwork.
+                //
+                // The mask half tests `mask_fill`, not `has_mask`: only the
+                // layout model proposes SFX, so mask *existence* is true of
+                // every candidate here and would leave the rule resting on
+                // glyph evidence alone.
                 None if class == Class::Sfx => {
                     let glyphs = pixels
                         || text_boxes
                             .iter()
                             .any(|b| overlaps(cluster.bbox, *b, config));
-                    let accepted = cluster.masked_score.is_some() && glyphs;
-                    (Role::Sfx, None, accepted)
+                    let traced = cluster
+                        .mask_fill
+                        .is_some_and(|fill| fill >= config.sfx_mask_fill);
+                    (Role::Sfx, None, traced && glyphs)
                 }
                 None => {
                     let accepted = cluster.detectors.len() >= 2 || pixels;
@@ -208,6 +249,7 @@ pub fn fuse(
                 detectors: cluster.detectors,
                 accepted,
                 bubble,
+                mask_fill: cluster.mask_fill,
             });
         }
     }
@@ -225,6 +267,8 @@ struct Cluster {
     detectors: Vec<Detector>,
     /// Best score among candidates that carried an instance mask.
     masked_score: Option<f32>,
+    /// Best `Candidate::mask_fill` in the cluster.
+    mask_fill: Option<f32>,
 }
 
 /// Group same-class candidates that describe one object. Cross-class nesting
@@ -253,6 +297,9 @@ fn cluster(candidates: &[Candidate], class: Class, config: &FusionConfig) -> Vec
                             .map_or(candidate.score, |s| s.max(candidate.score)),
                     );
                 }
+                if let Some(fill) = candidate.mask_fill {
+                    cluster.mask_fill = Some(cluster.mask_fill.map_or(fill, |f| f.max(fill)));
+                }
             }
             // Highest-scoring box wins the geometry. Unioning boxes across
             // detectors drifts outward every merge and over-erases.
@@ -261,6 +308,7 @@ fn cluster(candidates: &[Candidate], class: Class, config: &FusionConfig) -> Vec
                 score: candidate.score,
                 detectors: vec![candidate.detector],
                 masked_score: candidate.has_mask.then_some(candidate.score),
+                mask_fill: candidate.mask_fill,
             }),
         }
     }
@@ -314,6 +362,7 @@ mod tests {
             class,
             score,
             has_mask: false,
+            mask_fill: None,
         }
     }
 
@@ -479,12 +528,21 @@ mod tests {
     }
 
     #[test]
-    fn sfx_needs_a_mask_and_glyph_confirmation() {
+    fn sfx_needs_a_traced_mask_and_glyph_confirmation() {
         let config = FusionConfig::default();
         let sfx = [300.0, 300.0, 460.0, 380.0];
-        let masked = || {
+        // What the layout model actually hands in: every SFX candidate carries
+        // mask coefficients, so `has_mask` is set on the unmasked case too and
+        // only `mask_fill` separates the two.
+        let bare = || {
             let mut c = candidate(sfx, Detector::Layout, Class::Sfx, 0.45);
             c.has_mask = true;
+            c.mask_fill = Some(0.0);
+            c
+        };
+        let masked = || {
+            let mut c = bare();
+            c.mask_fill = Some(config.sfx_mask_fill + 0.01);
             c
         };
         let sfx_region = |fusion: Fusion| {
@@ -495,28 +553,18 @@ mod tests {
                 .expect("SFX region")
         };
 
-        let bare = fuse(
-            &[candidate(sfx, Detector::Layout, Class::Sfx, 0.45)],
-            &config,
-            no_mask,
-        );
-        assert_eq!(bare.regions[0].role, Role::Sfx);
+        let proposal = fuse(&[bare()], &config, no_mask);
+        assert_eq!(proposal.regions[0].role, Role::Sfx);
         assert!(
-            !bare.regions[0].accepted,
+            !proposal.regions[0].accepted,
             "raw SFX rectangles are proposals"
         );
 
-        // An instance mask with nothing to corroborate it is still one opinion.
+        // A traced mask with nothing to corroborate it is still one opinion.
         assert!(!sfx_region(fuse(&[masked()], &config, no_mask)).accepted);
-        // Glyph evidence over a rectangle nobody segmented, likewise.
-        assert!(
-            !sfx_region(fuse(
-                &[candidate(sfx, Detector::Layout, Class::Sfx, 0.45)],
-                &config,
-                |_| 0.3
-            ))
-            .accepted
-        );
+        // Glyph evidence over a box whose own mask traced nothing, likewise —
+        // this is the case `has_mask` alone could never reject.
+        assert!(!sfx_region(fuse(&[bare()], &config, |_| 0.3)).accepted);
 
         // Mask plus the pixel text mask.
         assert!(sfx_region(fuse(&[masked()], &config, |_| 0.3)).accepted);

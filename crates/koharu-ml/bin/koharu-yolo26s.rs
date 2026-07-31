@@ -108,8 +108,12 @@ async fn async_main() -> Result<()> {
     let image = image::load_from_memory_with_format(&bytes, format)?;
 
     let started = std::time::Instant::now();
-    let detection =
-        model.inference_with_threshold(&image, cli.confidence_threshold, !cli.no_masks)?;
+    let masks: &[Yolo26sClass] = if cli.no_masks {
+        &[]
+    } else {
+        &Yolo26sClass::ALL
+    };
+    let detection = model.inference_with_threshold(&image, cli.confidence_threshold, masks)?;
     let elapsed_ms = started.elapsed().as_millis();
 
     let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();

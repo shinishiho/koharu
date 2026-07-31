@@ -129,8 +129,8 @@ async function updateConfig(next: UpdateConfigBody): Promise<AppConfig> {
 
 const GITHUB_REPO = 'mayocream/koharu'
 
-/// What the API sends in place of a stored secret, and what it accepts back to
-/// mean "leave the stored one alone".
+// What the API sends in place of a stored secret, and what it accepts back to
+// mean "leave the stored one alone".
 const REDACTED = '[REDACTED]'
 
 const TABS = [

@@ -55,10 +55,13 @@ impl Engine for Model {
     async fn run(&self, ctx: EngineCtx<'_>) -> Result<Vec<Op>> {
         let image = load_source_image(ctx.scene, ctx.page, ctx.blobs)?;
 
-        // Masks stay off: `Candidate::has_mask` is a flag, and every yolo26s
-        // instance carries mask coefficients, so decoding them here would cost
-        // ~24 ms an instance to learn what is already known.
-        let layout = self.layout.inference(&image, false)?;
+        // Onomatopoeia masks only. Fusion's SFX rule asks how much of the box
+        // the mask actually traced, which nothing but the decoded mask can
+        // answer; every other class either has no mask clause or resolves it
+        // from the detector alone, and decoding costs ~24 ms an instance.
+        let layout = self
+            .layout
+            .inference(&image, &[Yolo26sClass::OnomatopoeiaText])?;
         let rtdetr = self.rtdetr.inference(&image)?;
         let ctd = self.ctd.inference(&image)?;
 
@@ -73,6 +76,7 @@ impl Engine for Model {
             },
             score: region.score,
             has_mask: false,
+            mask_fill: None,
         }));
         candidates.extend(ctd.text_blocks.iter().map(|block| Candidate {
             bbox: [
@@ -85,6 +89,7 @@ impl Engine for Model {
             class: Class::Text,
             score: block.confidence,
             has_mask: false,
+            mask_fill: None,
         }));
         if let Some(anime) = &self.anime {
             let detection = anime.inference(&image)?;
@@ -94,19 +99,21 @@ impl Engine for Model {
                 class: Class::Text,
                 score: region.score,
                 has_mask: false,
+                mask_fill: None,
             }));
         }
 
         let mask = ctd.mask;
         let fusion = fuse(&candidates, &self.config, |bbox| mask_coverage(&mask, bbox));
 
-        // Per-region coverage, at debug level: this is the measurement
-        // `FusionConfig::mask_coverage` is tuned from, and the mask changes
-        // whenever comic-text-detector does.
+        // Per-region evidence, at debug level: these are the measurements
+        // `mask_coverage` and `sfx_mask_fill` are tuned from, and both move
+        // whenever the models behind them change.
         if tracing::enabled!(tracing::Level::DEBUG) {
             for region in &fusion.regions {
                 tracing::debug!(
                     coverage = mask_coverage(&mask, region.bbox),
+                    fill = region.mask_fill,
                     votes = region.detectors.len(),
                     role = ?region.role,
                     accepted = region.accepted,
@@ -116,13 +123,16 @@ impl Engine for Model {
         }
 
         let accepted = fusion.regions.iter().filter(|r| r.accepted).count();
+        let voters: std::collections::HashSet<Detector> =
+            candidates.iter().map(|c| c.detector).collect();
         tracing::info!(
             candidates = candidates.len(),
             bubbles = fusion.bubbles.len(),
             regions = fusion.regions.len(),
             accepted,
             dropped = fusion.regions.len() - accepted,
-            voters = 3 + usize::from(self.anime.is_some()),
+            // What actually proposed something, not how many models loaded.
+            voters = voters.len(),
             "fusion"
         );
 
@@ -201,8 +211,16 @@ fn layout_candidates(regions: &[Yolo26sRegion]) -> Vec<Candidate> {
                 detector: Detector::Layout,
                 class,
                 score: region.score,
-                // Every yolo26s instance carries mask coefficients.
+                // Every yolo26s instance carries mask coefficients, decoded or
+                // not — this says the proposal came from the model that
+                // segments, which is what tells it apart from RT-DETR's.
                 has_mask: true,
+                // Decoded only for the classes asked for at inference; the box
+                // is in page pixels and so is the mask.
+                mask_fill: region
+                    .mask
+                    .as_ref()
+                    .map(|mask| mask_coverage(mask, region.bbox)),
             })
         })
         .collect()
@@ -283,6 +301,14 @@ mod tests {
         }
     }
 
+    /// A page-sized mask lighting `lit` inside `bbox`, for mask-fill tests.
+    fn mask_with(width: u32, height: u32, lit: [u32; 4]) -> GrayImage {
+        GrayImage::from_fn(width, height, |x, y| {
+            let inside = x >= lit[0] && x < lit[2] && y >= lit[1] && y < lit[3];
+            image::Luma([if inside { 255 } else { 0 }])
+        })
+    }
+
     #[test]
     fn layout_classes_map_onto_fusion_classes() {
         let candidates = layout_candidates(&[
@@ -304,6 +330,38 @@ mod tests {
         let classes: Vec<Class> = candidates.iter().map(|c| c.class).collect();
         assert_eq!(classes, vec![Class::Bubble, Class::Text, Class::Sfx]);
         assert!(candidates.iter().all(|c| c.has_mask));
+        // Undecoded masks leave no fill to measure, which is what keeps the SFX
+        // rule from resting on a value nobody computed.
+        assert!(candidates.iter().all(|c| c.mask_fill.is_none()));
+    }
+
+    #[test]
+    fn sfx_mask_fill_measures_the_decoded_mask_not_its_existence() {
+        // Two SFX boxes the model scored identically: one whose mask traced a
+        // fifth of the box, one whose mask lit nothing. Before masks were
+        // decoded both were `has_mask: true` and indistinguishable.
+        let bbox = [0.0, 0.0, 100.0, 100.0];
+        let traced = Yolo26sRegion {
+            mask: Some(mask_with(100, 100, [0, 0, 100, 20])),
+            ..region(Yolo26sClass::OnomatopoeiaText, bbox, 0.6)
+        };
+        let empty = Yolo26sRegion {
+            mask: Some(mask_with(100, 100, [0, 0, 0, 0])),
+            ..region(Yolo26sClass::OnomatopoeiaText, bbox, 0.6)
+        };
+
+        let candidates = layout_candidates(&[traced, empty]);
+        assert_eq!(candidates[0].mask_fill, Some(0.2));
+        assert_eq!(candidates[1].mask_fill, Some(0.0));
+        assert!(candidates.iter().all(|c| c.has_mask), "same on both");
+
+        // Same glyph evidence, opposite outcomes — the whole point of the fill.
+        let config = FusionConfig::default();
+        let accepted = |candidate: &Candidate| {
+            fuse(std::slice::from_ref(candidate), &config, |_| 1.0).regions[0].accepted
+        };
+        assert!(accepted(&candidates[0]));
+        assert!(!accepted(&candidates[1]));
     }
 
     #[test]
@@ -342,6 +400,7 @@ mod tests {
             detectors: vec![Detector::Layout, Detector::ComicTextDetector],
             accepted: true,
             bubble: None,
+            mask_fill: None,
         });
 
         assert_eq!(bbox, [10.0, 10.0, 40.0, 90.0]);
