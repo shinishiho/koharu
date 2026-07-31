@@ -88,6 +88,7 @@ once_cell = "1.21"
 libloading = "0.8.9"
 num_cpus = "1.17"
 rustfft = "6.4"
+ort = "=2.0.0-rc.13"
 cudarc = { version = "0.19.4", features = [
     "cuda-version-from-build-system",
     "cufft",

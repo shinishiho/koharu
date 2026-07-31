@@ -4,12 +4,14 @@
  */
 import type { DataConfig } from './dataConfig'
 import type { HttpConfig } from './httpConfig'
+import type { HuggingFaceConfig } from './huggingFaceConfig'
 import type { PipelineConfig } from './pipelineConfig'
 import type { ProviderConfig } from './providerConfig'
 
 export interface AppConfig {
   data?: DataConfig
   http?: HttpConfig
+  huggingface?: HuggingFaceConfig
   pipeline?: PipelineConfig
   providers?: ProviderConfig[]
 }

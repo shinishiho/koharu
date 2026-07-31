@@ -44,6 +44,11 @@ async fn patch_config(
     config::apply_patch(&mut next, patch);
     config::sync_secrets(&next).map_err(ApiError::internal)?;
     config::save(&next).map_err(ApiError::internal)?;
+    // A token pasted here is usually a response to a download that just failed,
+    // so apply it live instead of waiting for a restart.
+    app.runtime()
+        .downloads()
+        .set_hf_token(next.huggingface.token.as_ref().map(|t| t.expose()));
     app.config.store(Arc::new(next.clone()));
     Ok(Json(next))
 }

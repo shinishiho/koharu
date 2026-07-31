@@ -56,3 +56,5 @@ zip = { workspace = true }
 [features]
 cuda = ["koharu-ml/cuda"]
 metal = ["koharu-ml/metal"]
+# ONNX Runtime is always on; this only adds its CUDA execution provider.
+onnx-cuda = ["koharu-ml/onnx-cuda"]

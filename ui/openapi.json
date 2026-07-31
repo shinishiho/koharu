@@ -940,6 +940,14 @@
               "read_timeout": 300
             }
           },
+          "huggingface": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HuggingFaceConfig"
+              }
+            ],
+            "default": {}
+          },
           "pipeline": {
             "oneOf": [
               {
@@ -948,7 +956,7 @@
             ],
             "default": {
               "bubble_segmenter": "speech-bubble-segmentation",
-              "detector": "pp-doclayout-v3",
+              "detector": "koharu-yolo26s",
               "font_detector": "yuzumarker-font-detection",
               "inpainter": "lama-manga",
               "ocr": "paddle-ocr-vl-1.6",
@@ -1154,6 +1162,16 @@
               },
               {
                 "$ref": "#/components/schemas/HttpConfigPatch"
+              }
+            ]
+          },
+          "huggingface": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HuggingFaceConfigPatch"
               }
             ]
           },
@@ -1598,6 +1616,26 @@
             "type": ["integer", "null"],
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "HuggingFaceConfig": {
+        "type": "object",
+        "description": "HuggingFace access, for the gated model repositories.",
+        "properties": {
+          "token": {
+            "type": ["string", "null"],
+            "description": "Populated from credential storage on `load()`, never written to\nconfig.toml. Serializes as `\"[REDACTED]\"` in API responses.\n\nOnly some model repositories need this. `deepghs/AnimeText_yolo` is\n`gated: auto`: the terms have to be accepted on the repo page and the\nrequest has to be authenticated. When unset, koharu still honors\n`HF_TOKEN` and the `hf auth login` file.",
+            "default": null
+          }
+        }
+      },
+      "HuggingFaceConfigPatch": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": ["string", "null"],
+            "description": "`\"[REDACTED]\"` → keep existing keyring secret; empty → clear; otherwise save."
           }
         }
       },
@@ -2403,7 +2441,7 @@
       },
       "PipelineConfig": {
         "type": "object",
-        "description": "Engine selection for each pipeline stage.\nValues are engine IDs (e.g. \"pp-doclayout-v3\", \"comic-text-detector\").\nEmpty string means use default.",
+        "description": "Engine selection for each pipeline stage.\nValues are engine IDs (e.g. \"koharu-yolo26s\", \"comic-text-detector-seg\").\nEmpty string means use default.",
         "properties": {
           "bubble_segmenter": {
             "type": "string",
@@ -2411,7 +2449,7 @@
           },
           "detector": {
             "type": "string",
-            "default": "pp-doclayout-v3"
+            "default": "koharu-yolo26s"
           },
           "font_detector": {
             "type": "string",
@@ -2785,7 +2823,7 @@
         "properties": {
           "modelId": {
             "type": "string",
-            "description": "Package id, as declared via `declare_hf_model_package!`\n(e.g. `\"model:comic-text-detector:yolo-v5\"`)."
+            "description": "Package id, as declared via `declare_hf_model_package!`\n(e.g. `\"model:comic-text-detector:onnx\"`)."
           }
         }
       },

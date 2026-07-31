@@ -1,28 +1,21 @@
 use std::{fs, path::PathBuf, time::Instant};
 
-use crate::{device, loading};
 use anyhow::{Context, Result};
 use candle_core::{DType, Device, Tensor};
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use koharu_runtime::RuntimeManager;
 use rayon::prelude::*;
 
-mod models;
-pub use models::ModelKind;
+mod onnx;
 
 pub(super) const FONT_COUNT: usize = 6_150;
 const REGRESSION_START: usize = FONT_COUNT + 2;
 pub(super) const REGRESSION_DIM: usize = 10;
 
+/// Only the labels come from here now — the weights this repo also carries
+/// were for the candle backbone, which is gone.
 const HF_REPO: &str = "fffonion/yuzumarker-font-detection";
 
-koharu_runtime::declare_hf_model_package!(
-    id: "model:font-detector:weights",
-    repo: "fffonion/yuzumarker-font-detection",
-    file: "yuzumarker-font-detection.safetensors",
-    bootstrap: false,
-    order: 140,
-);
 koharu_runtime::declare_hf_model_package!(
     id: "model:font-detector:labels",
     repo: "fffonion/yuzumarker-font-detection",
@@ -34,41 +27,17 @@ koharu_runtime::declare_hf_model_package!(
 pub use crate::types::{FontPrediction, NamedFontPrediction, TextDirection, TopFont};
 
 pub struct FontDetector {
-    model: models::Model,
+    model: onnx::OnnxFontDetector,
     labels: FontLabels,
-    device: Device,
-    dtype: DType,
 }
 
 impl FontDetector {
+    /// Labels still come from the safetensors repo — the ONNX repo ships only
+    /// the graph.
     pub async fn load(runtime: &RuntimeManager, cpu: bool) -> Result<Self> {
-        Self::load_with_kind(runtime, cpu, ModelKind::default()).await
-    }
-
-    pub async fn load_with_kind(
-        runtime: &RuntimeManager,
-        cpu: bool,
-        kind: ModelKind,
-    ) -> Result<Self> {
-        let device = device(cpu)?;
-        let dtype = loading::model_dtype(&device);
-        let downloads = runtime.downloads();
-        let weights_path = downloads
-            .huggingface_model(HF_REPO, "yuzumarker-font-detection.safetensors")
-            .await?;
-        let model = loading::load_mmaped_safetensors_path_with_dtype(
-            &weights_path,
-            &device,
-            dtype,
-            move |vb| models::Model::load(vb.pp("model._orig_mod.model"), kind),
-        )?;
-        let labels = FontLabels::load(runtime).await?;
-
         Ok(Self {
-            model,
-            device,
-            dtype,
-            labels,
+            model: onnx::OnnxFontDetector::load(runtime, cpu).await?,
+            labels: FontLabels::load(runtime).await?,
         })
     }
 
@@ -78,7 +47,7 @@ impl FontDetector {
         }
 
         let started = Instant::now();
-        let input_size = self.model.input_size();
+        let input_size = onnx::INPUT_SIZE;
         let original_sizes = images
             .iter()
             .map(|image| image.dimensions().0)
@@ -90,22 +59,14 @@ impl FontDetector {
             .collect::<Vec<_>>()
             .into_iter()
             .collect::<Result<Vec<_>>>()?;
-        let batch = Tensor::stack(&processed, 0)?
-            .to_device(&self.device)?
-            .to_dtype(self.dtype)?;
+        let batch = Tensor::stack(&processed, 0)?;
         let preprocess_elapsed = preprocess_started.elapsed();
 
         let forward_started = Instant::now();
-        let logits = self
-            .model
-            .forward(&batch, false)?
-            .to_dtype(DType::F32)?
-            .to_device(&Device::Cpu)?;
+        let rows = self.model.forward(&batch)?;
         let forward_elapsed = forward_started.elapsed();
 
         let postprocess_started = Instant::now();
-        let rows = logits.to_vec2::<f32>()?;
-
         let mut predictions = Vec::with_capacity(images.len());
         for (row, width) in rows.into_iter().zip(original_sizes) {
             let ranked: Vec<TopFont> = top_k_softmax(&row[..FONT_COUNT], top_k.min(FONT_COUNT))
@@ -134,10 +95,7 @@ impl FontDetector {
                 TextDirection::Horizontal
             };
 
-            let regression = row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM]
-                .iter()
-                .map(|&value| sigmoid_scalar(value))
-                .collect::<Vec<_>>();
+            let regression = &row[REGRESSION_START..REGRESSION_START + REGRESSION_DIM];
             let clamp01 = |v: f32| v.clamp(0.0, 1.0);
             let text_color = [
                 (clamp01(regression[0]) * 255.0).round() as u8,
@@ -293,8 +251,4 @@ fn insert_ranked(best: &mut Vec<(usize, f32)>, candidate: (usize, f32), limit: u
     } else if best.len() < limit {
         best.push(candidate);
     }
-}
-
-fn sigmoid_scalar(value: f32) -> f32 {
-    1.0 / (1.0 + (-value).exp())
 }

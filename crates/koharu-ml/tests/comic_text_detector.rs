@@ -33,7 +33,8 @@ async fn comic_text_detector() -> anyhow::Result<()> {
 #[ignore = "requires model download and is not critical for CI"]
 async fn comic_text_detector_segmentation_only() -> anyhow::Result<()> {
     let runtime = support::cpu_runtime();
-    let model = ComicTextDetector::load_segmentation_only(&runtime, false).await?;
+    // One graph covers both, so this exercises the mask output of the same load.
+    let model = ComicTextDetector::load(&runtime, false).await?;
 
     let img = image::open(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/1.jpg"))?;
     let mask = model.inference_segmentation(&img)?;

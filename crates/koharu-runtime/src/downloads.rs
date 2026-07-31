@@ -11,7 +11,7 @@ use hf_hub::{
 };
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use koharu_core::events::{DownloadProgress, DownloadStatus};
-use reqwest::header::{CONTENT_LENGTH, RANGE};
+use reqwest::header::{AUTHORIZATION, CONTENT_LENGTH, RANGE};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 
@@ -34,6 +34,14 @@ const HF_METADATA_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Downloads {
     downloads_root: PathBuf,
     huggingface_cache: Cache,
+    /// What the machine already had: `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`,
+    /// koharu's cache, the `hf auth login` file. Resolved once at startup.
+    hf_token_discovered: Option<String>,
+    /// What the user configured in koharu itself, which wins over discovery —
+    /// they typed it into this app, so this app should use it. Shared across
+    /// clones (`downloads()` hands out a clone) and settable at runtime, so
+    /// pasting a token in settings works without a restart.
+    hf_token_override: Arc<std::sync::RwLock<Option<String>>>,
     client: RuntimeHttpClient,
     tx: broadcast::Sender<DownloadProgress>,
     progress: Arc<MultiProgress>,
@@ -46,14 +54,45 @@ impl Downloads {
         http: &RuntimeHttpConfig,
     ) -> Result<Self> {
         let client = http.build_client()?;
+        let huggingface_cache = Cache::new(huggingface_root);
 
         Ok(Self {
             downloads_root,
-            huggingface_cache: Cache::new(huggingface_root),
+            hf_token_discovered: hf_token(&huggingface_cache),
+            hf_token_override: Arc::new(std::sync::RwLock::new(None)),
+            huggingface_cache,
             client,
             tx: broadcast::channel(256).0,
             progress: Arc::new(MultiProgress::new()),
         })
+    }
+
+    /// Whether a HuggingFace access token is available. Gated repos need one.
+    pub fn has_hf_token(&self) -> bool {
+        self.hf_token().is_some()
+    }
+
+    /// Set (or clear, with `None`) koharu's own configured token. Clearing falls
+    /// back to whatever was discovered on the machine rather than to nothing.
+    pub fn set_hf_token(&self, token: Option<&str>) {
+        let token = token
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        // Never log the value itself.
+        tracing::debug!(configured = token.is_some(), "HuggingFace token updated");
+        match self.hf_token_override.write() {
+            Ok(mut slot) => *slot = token,
+            Err(_) => tracing::error!("HuggingFace token lock poisoned, token not updated"),
+        }
+    }
+
+    fn hf_token(&self) -> Option<String> {
+        self.hf_token_override
+            .read()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .or_else(|| self.hf_token_discovered.clone())
     }
 
     pub fn client(&self) -> RuntimeHttpClient {
@@ -81,6 +120,10 @@ impl Downloads {
         let api = ApiBuilder::from_cache(self.huggingface_cache.clone())
             .with_progress(false)
             .with_user_agent("koharu", env!("CARGO_PKG_VERSION"))
+            // `from_cache` only reads a token file next to our own cache dir;
+            // `hf_token` also honors koharu's setting, the env vars and the
+            // `hf auth login` file.
+            .with_token(self.hf_token())
             .build()
             .context("failed to build HF Hub API")?;
         let repo_handle = api.model(repo.to_string());
@@ -89,6 +132,7 @@ impl Downloads {
         let metadata: Metadata = tokio::time::timeout(HF_METADATA_TIMEOUT, api.metadata(&url))
             .await
             .map_err(|_| anyhow::anyhow!("HF metadata request timed out for `{repo}/{filename}`"))?
+            .map_err(|error| self.explain_access(error.into(), repo))
             .with_context(|| format!("failed to fetch HF metadata for `{repo}/{filename}`"))?;
 
         let blob_path = cache_repo.blob_path(metadata.etag());
@@ -104,6 +148,7 @@ impl Downloads {
                 .ranged_download(&url, &blob_path, &reporter, Some(metadata.size() as u64))
                 .await
             {
+                let error = self.explain_access(error, repo);
                 reporter.fail(&error);
                 return Err(error.context(format!(
                     "failed to download HF model file `{repo}/{filename}`"
@@ -202,7 +247,6 @@ impl Downloads {
             .map(|(start, stop)| async move {
                 let range = format!("bytes={start}-{stop}");
                 let response = self
-                    .client
                     .get(url)
                     .header(RANGE, &range)
                     .send()
@@ -253,9 +297,53 @@ impl Downloads {
         Ok(())
     }
 
+    /// A GET carrying the HF token when — and only when — the URL is on
+    /// huggingface.co itself. The token must not ride along to arbitrary hosts
+    /// `cached_download` is pointed at. HF's `resolve` endpoint 302s to a signed
+    /// CDN URL on another host; reqwest strips `Authorization` across origins,
+    /// and the signature is what authorizes that leg.
+    fn get(&self, url: &str) -> reqwest_middleware::RequestBuilder {
+        self.authorized(self.client.get(url), url)
+    }
+
+    fn head(&self, url: &str) -> reqwest_middleware::RequestBuilder {
+        self.authorized(self.client.head(url), url)
+    }
+
+    fn authorized(
+        &self,
+        request: reqwest_middleware::RequestBuilder,
+        url: &str,
+    ) -> reqwest_middleware::RequestBuilder {
+        match self.hf_token() {
+            Some(token) if is_huggingface_url(url) => {
+                request.header(AUTHORIZATION, format!("Bearer {token}"))
+            }
+            _ => request,
+        }
+    }
+
+    /// Turn a 401/403 into something a user can act on. Gated repos are the
+    /// only reason koharu sees these, and the fix is off-machine (accept the
+    /// terms) plus on-machine (provide a token), so both halves get named.
+    fn explain_access(&self, error: anyhow::Error, repo: &str) -> anyhow::Error {
+        if !denies_access(&error) {
+            return error;
+        }
+        let token_state = if self.has_hf_token() {
+            "the token found on this machine does not have access"
+        } else {
+            "no HuggingFace token was found on this machine"
+        };
+        error.context(format!(
+            "`{repo}` is a gated repository and {token_state}. \
+             Accept the terms at https://huggingface.co/{repo}, then add a token \
+             in Settings under API keys (or set HF_TOKEN, or run `hf auth login`)"
+        ))
+    }
+
     async fn probe_content_length(&self, url: &str) -> Result<u64> {
         let response = self
-            .client
             .head(url)
             .send()
             .await
@@ -358,6 +446,67 @@ impl TransferReporter {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Find a HuggingFace access token, needed for gated repos.
+///
+/// Order: `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN` (both what the Python
+/// tooling reads), then a `token` file beside koharu's own model cache, then
+/// the shared one `hf auth login` writes. Env first so a shell can override a
+/// stale login without deleting files.
+fn hf_token(cache: &Cache) -> Option<String> {
+    let from_env = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .find(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string());
+
+    from_env
+        .or_else(|| cache.token())
+        .or_else(|| Cache::default().token())
+}
+
+/// Whether an error is the Hub refusing access — 401 or 403.
+///
+/// Prefers the typed status off any `reqwest::Error` in the chain, which is
+/// what our own `error_for_status` path produces. hf-hub only renders its
+/// status into the message, so that case falls back to matching the rendered
+/// status line rather than the bare digits: a repo named `sd-403` or a
+/// `Content-Length: 4030` must not read as a permission failure.
+fn denies_access(error: &anyhow::Error) -> bool {
+    let status = error
+        .chain()
+        .filter_map(|source| source.downcast_ref::<reqwest::Error>())
+        .find_map(reqwest::Error::status);
+    if let Some(status) = status {
+        return status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN;
+    }
+
+    let message = format!("{error:#}");
+    [
+        "401 Unauthorized",
+        "403 Forbidden",
+        "status code: 401",
+        "status code: 403",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
+/// Whether `url` is on huggingface.co itself, as opposed to a CDN or a
+/// third-party host. Subdomains count — the Hub serves `resolve` from the apex
+/// but LFS metadata from siblings.
+fn is_huggingface_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    parsed
+        .host_str()
+        .is_some_and(|host| host == "huggingface.co" || host.ends_with(".huggingface.co"))
+}
+
 fn part_path(destination: &Path) -> Result<PathBuf> {
     let file_name = destination.file_name().ok_or_else(|| {
         anyhow::anyhow!(
@@ -370,13 +519,99 @@ fn part_path(destination: &Path) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::part_path;
+    use super::{Downloads, denies_access, is_huggingface_url, part_path};
+    use crate::runtime::RuntimeHttpConfig;
+
+    /// A `Downloads` with a known discovered token, standing in for one found in
+    /// the environment or a login file.
+    fn with_discovered_token(discovered: Option<&str>) -> Downloads {
+        let mut downloads = Downloads::new(
+            PathBuf::from("/tmp/koharu-test-downloads"),
+            PathBuf::from("/tmp/koharu-test-hf"),
+            &RuntimeHttpConfig::default(),
+        )
+        .expect("build downloads");
+        downloads.hf_token_discovered = discovered.map(str::to_string);
+        downloads
+    }
+
+    #[test]
+    fn configured_token_wins_and_clearing_falls_back_to_discovery() {
+        let downloads = with_discovered_token(Some("from-the-environment"));
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        downloads.set_hf_token(Some("from-settings"));
+        assert_eq!(downloads.hf_token().as_deref(), Some("from-settings"));
+
+        // Clearing koharu's own setting must not hide a token the machine
+        // already had.
+        downloads.set_hf_token(None);
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        // Whitespace is not a token.
+        downloads.set_hf_token(Some("   "));
+        assert_eq!(
+            downloads.hf_token().as_deref(),
+            Some("from-the-environment")
+        );
+
+        let bare = with_discovered_token(None);
+        assert!(!bare.has_hf_token());
+        bare.set_hf_token(Some(" padded "));
+        assert_eq!(bare.hf_token().as_deref(), Some("padded"));
+        assert!(bare.has_hf_token());
+    }
 
     #[test]
     fn partial_download_path_appends_suffix() {
         let part = part_path(Path::new("/tmp/models/config.json")).unwrap();
         assert_eq!(part, Path::new("/tmp/models/config.json.part"));
+    }
+
+    #[test]
+    fn access_denial_is_not_inferred_from_stray_digits() {
+        // hf-hub renders its status into the message; these are the shapes that
+        // mean the Hub said no.
+        for rendered in [
+            "request error: 401 Unauthorized",
+            "403 Forbidden",
+            "http status code: 403",
+        ] {
+            assert!(denies_access(&anyhow::anyhow!("{rendered}")), "{rendered}");
+        }
+
+        // …and these are the ones that merely contain the digits. Before the
+        // typed check these all produced gated-repo advice for an unrelated
+        // failure.
+        for innocent in [
+            "failed to download `someone/sd-403-anime`",
+            "connection closed after 401 bytes",
+            "failed to fetch range bytes=4030-8060",
+            "no such host",
+        ] {
+            assert!(!denies_access(&anyhow::anyhow!("{innocent}")), "{innocent}");
+        }
+    }
+
+    #[test]
+    fn only_huggingface_hosts_receive_the_token() {
+        assert!(is_huggingface_url(
+            "https://huggingface.co/deepghs/AnimeText_yolo/resolve/main/model.onnx"
+        ));
+        assert!(is_huggingface_url("https://cdn-lfs.huggingface.co/repos/x"));
+        // Lookalikes and plain HTTP must never see an Authorization header.
+        assert!(!is_huggingface_url("https://huggingface.co.evil.test/x"));
+        assert!(!is_huggingface_url("https://nothuggingface.co/x"));
+        assert!(!is_huggingface_url("http://huggingface.co/x"));
+        assert!(!is_huggingface_url("https://github.com/x"));
+        assert!(!is_huggingface_url("not a url"));
     }
 }

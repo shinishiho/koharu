@@ -29,6 +29,7 @@ tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 rustfft = { workspace = true }
 rayon = { workspace = true }
+ort = { workspace = true }
 cudarc = { workspace = true, optional = true }
 objc2 = { workspace = true, optional = true }
 objc2-metal = { workspace = true, optional = true }
@@ -36,8 +37,16 @@ objc2-metal-performance-shaders = { workspace = true, optional = true }
 objc2-metal-performance-shaders-graph = { workspace = true, optional = true }
 objc2-foundation = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# CoreML execution provider, so the ONNX path has a GPU/ANE option on macOS.
+ort = { workspace = true, features = ["coreml"] }
+
 [features]
+# CUDA for the ONNX detectors only. The full `cuda` feature drags in
+# candle-flash-attn, which needs sm_80+; this one builds on older cards.
+onnx-cuda = ["ort/cuda"]
 cuda = [
+    "ort/cuda",
     "candle-core/cuda",
     "candle-core/cudnn",
     "candle-nn/cuda",
@@ -71,6 +80,10 @@ name = "comic-text-bubble-detector"
 path = "bin/comic-text-bubble-detector.rs"
 
 [[bin]]
+name = "koharu-yolo26s"
+path = "bin/koharu-yolo26s.rs"
+
+[[bin]]
 name = "lama"
 path = "bin/lama.rs"
 
@@ -89,10 +102,6 @@ path = "bin/mit48px-ocr.rs"
 [[bin]]
 name = "font-detect"
 path = "bin/font-detect.rs"
-
-[[bin]]
-name = "pp-doclayout-v3"
-path = "bin/pp-doclayout-v3.rs"
 
 [[bin]]
 name = "manga-text-segmentation-2025"

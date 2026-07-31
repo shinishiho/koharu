@@ -6,7 +6,7 @@
 export interface StartDownloadRequest {
   /**
    * Package id, as declared via `declare_hf_model_package!`
-   * (e.g. `"model:comic-text-detector:yolo-v5"`).
+   * (e.g. `"model:comic-text-detector:onnx"`).
    */
   modelId: string
 }

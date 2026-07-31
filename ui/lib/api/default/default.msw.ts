@@ -29,6 +29,7 @@ import type {
   GoogleFontCatalog,
   HistoryResult,
   HttpConfig,
+  HuggingFaceConfig,
   ListDownloadsResponse,
   ListOperationsResponse,
   ListProjectsResponse,
@@ -69,6 +70,15 @@ export const getGetConfigResponseHttpConfigMock = (
   ...overrideResponse,
 })
 
+export const getGetConfigResponseHuggingFaceConfigMock = (
+  overrideResponse: Partial<HuggingFaceConfig> = {},
+): HuggingFaceConfig => ({
+  ...{
+    token: faker.helpers.arrayElement([faker.string.alpha({ length: { min: 10, max: 20 } }), null]),
+  },
+  ...overrideResponse,
+})
+
 export const getGetConfigResponsePipelineConfigMock = (
   overrideResponse: Partial<PipelineConfig> = {},
 ): PipelineConfig => ({
@@ -90,6 +100,7 @@ export const getGetConfigResponseMock = (
 ): AppConfig => ({
   data: faker.helpers.arrayElement([{ ...getGetConfigResponseDataConfigMock() }]),
   http: faker.helpers.arrayElement([{ ...getGetConfigResponseHttpConfigMock() }]),
+  huggingface: faker.helpers.arrayElement([{ ...getGetConfigResponseHuggingFaceConfigMock() }]),
   pipeline: faker.helpers.arrayElement([{ ...getGetConfigResponsePipelineConfigMock() }]),
   providers: Array.from({ length: faker.number.int({ min: 1, max: 10 }) }, (_, i) => i + 1).map(
     () => ({
@@ -125,6 +136,15 @@ export const getPatchConfigResponseHttpConfigMock = (
   ...overrideResponse,
 })
 
+export const getPatchConfigResponseHuggingFaceConfigMock = (
+  overrideResponse: Partial<HuggingFaceConfig> = {},
+): HuggingFaceConfig => ({
+  ...{
+    token: faker.helpers.arrayElement([faker.string.alpha({ length: { min: 10, max: 20 } }), null]),
+  },
+  ...overrideResponse,
+})
+
 export const getPatchConfigResponsePipelineConfigMock = (
   overrideResponse: Partial<PipelineConfig> = {},
 ): PipelineConfig => ({
@@ -146,6 +166,7 @@ export const getPatchConfigResponseMock = (
 ): AppConfig => ({
   data: faker.helpers.arrayElement([{ ...getPatchConfigResponseDataConfigMock() }]),
   http: faker.helpers.arrayElement([{ ...getPatchConfigResponseHttpConfigMock() }]),
+  huggingface: faker.helpers.arrayElement([{ ...getPatchConfigResponseHuggingFaceConfigMock() }]),
   pipeline: faker.helpers.arrayElement([{ ...getPatchConfigResponsePipelineConfigMock() }]),
   providers: Array.from({ length: faker.number.int({ min: 1, max: 10 }) }, (_, i) => i + 1).map(
     () => ({

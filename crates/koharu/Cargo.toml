@@ -50,6 +50,9 @@ winreg = { workspace = true }
 [features]
 cuda = ["koharu-app/cuda"]
 metal = ["koharu-app/metal"]
+# CUDA for the detectors, which run on ONNX Runtime. Separate from `cuda`,
+# which is candle's and drags in candle-flash-attn (sm_80+).
+onnx-cuda = ["koharu-app/onnx-cuda"]
 
 [build-dependencies]
 tauri-build = { workspace = true }

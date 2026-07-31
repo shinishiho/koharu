@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow, ensure};
 use clap::{Parser, ValueEnum};
 use imageproc::{drawing::draw_hollow_rect_mut, rect::Rect};
-use koharu_ml::anime_text::{AnimeTextDetector, AnimeTextYoloVariant};
+use koharu_ml::anime_text::{
+    AnimeTextDetector, AnimeTextYoloVariant, DEFAULT_CONFIDENCE_THRESHOLD,
+};
 use koharu_runtime::{ComputePolicy, RuntimeManager, default_app_data_root};
 use tokio::runtime::Builder;
 
@@ -43,8 +45,9 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Variant::N)]
     variant: Variant,
 
-    #[arg(long, default_value_t = 0.25)]
-    confidence_threshold: f32,
+    /// Defaults to the threshold upstream ships with the export, then to 0.25.
+    #[arg(long)]
+    confidence_threshold: Option<f32>,
 
     #[arg(long, default_value_t = 0.45)]
     nms_threshold: f32,
@@ -85,8 +88,12 @@ async fn async_main() -> Result<()> {
     let bytes = std::fs::read(&cli.input)?;
     let format = image::guess_format(&bytes)?;
     let image = image::load_from_memory_with_format(&bytes, format)?;
+    let confidence_threshold = cli
+        .confidence_threshold
+        .or_else(|| model.recommended_confidence())
+        .unwrap_or(DEFAULT_CONFIDENCE_THRESHOLD);
     let detection =
-        model.inference_with_thresholds(&image, cli.confidence_threshold, cli.nms_threshold)?;
+        model.inference_with_thresholds(&image, confidence_threshold, cli.nms_threshold)?;
 
     ensure!(
         !detection.regions.is_empty(),

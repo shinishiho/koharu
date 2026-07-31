@@ -4,6 +4,7 @@
  */
 import type { DataConfigPatch } from './dataConfigPatch'
 import type { HttpConfigPatch } from './httpConfigPatch'
+import type { HuggingFaceConfigPatch } from './huggingFaceConfigPatch'
 import type { PipelineConfigPatch } from './pipelineConfigPatch'
 import type { ProviderPatch } from './providerPatch'
 
@@ -15,6 +16,7 @@ import type { ProviderPatch } from './providerPatch'
 export interface ConfigPatch {
   data?: null | DataConfigPatch
   http?: null | HttpConfigPatch
+  huggingface?: null | HuggingFaceConfigPatch
   pipeline?: null | PipelineConfigPatch
   /**
    * If present, replaces the entire list. Api_key values of `"[REDACTED]"`

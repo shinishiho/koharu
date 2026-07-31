@@ -8,6 +8,7 @@
 pub mod artifacts;
 pub mod engine;
 mod engines;
+pub mod fusion;
 
 pub use artifacts::Artifact;
 pub use engine::{
@@ -358,12 +359,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_includes_anime_text_detector() {
+    fn catalog_offers_exactly_one_detector() {
         let catalog = catalog();
 
+        // One engine per stage is the design: a detector swapped underneath
+        // fusion would change which votes exist.
+        assert_eq!(catalog.detectors.len(), 1);
         assert!(catalog.detectors.iter().any(|engine| {
-            engine.id == "anime-text"
-                && engine.name == "Anime Text YOLO (N)"
+            engine.id == "koharu-fusion"
                 && engine.produces.iter().map(String::as_str).eq(["TextBoxes"])
         }));
     }

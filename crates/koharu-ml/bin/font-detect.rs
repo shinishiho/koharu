@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use koharu_ml::font_detector::{FontDetector, ModelKind, TextDirection};
+use koharu_ml::font_detector::{FontDetector, TextDirection};
 use koharu_runtime::{ComputePolicy, RuntimeManager, default_app_data_root};
 
 #[derive(Parser, Debug)]
@@ -21,9 +21,6 @@ struct Args {
     /// Force CPU even if GPU is available.
     #[arg(long)]
     cpu: bool,
-    /// Backbone architecture (must match the converted checkpoint).
-    #[arg(long, default_value = "resnet50", value_enum)]
-    model: ModelKind,
 }
 
 #[tokio::main]
@@ -39,7 +36,7 @@ async fn main() -> Result<()> {
     )?;
     runtime.prepare().await?;
 
-    let detector = FontDetector::load_with_kind(&runtime, args.cpu, args.model).await?;
+    let detector = FontDetector::load(&runtime, args.cpu).await?;
     let image = image::open(&args.input)?;
     let start = std::time::Instant::now();
     let result = detector.inference(&[image], args.top_k)?;
